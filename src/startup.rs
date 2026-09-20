@@ -1,17 +1,34 @@
 // src/startup.rs
 
 // dependencies
+use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
-use crate::routes::{api, health_check, pages};
+use crate::guards::require_datastar_request_header;
+use actix_web::middleware::from_fn;
+use crate::routes::{api, auth, health_check, pages};
+use crate::services::RateLimiter;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
 use crate::template::{TemplateRenderer, tera::TeraRenderer};
 use actix_files::Files as ActixFiles;
+use actix_identity::IdentityMiddleware;
+use actix_session::SessionMiddleware;
+use actix_session::config::PersistentSession;
+use actix_web::cookie::Key;
 use actix_web::dev::Server;
 use actix_web::{App, HttpServer, web};
+use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
+
+/// Login/register rate limiting: 5 attempts per 15 minutes, burst 5.
+const AUTH_RATE_PER_SECOND: f64 = 5.0 / (15.0 * 60.0);
+const AUTH_BURST_CAPACITY: f64 = 5.0;
+
+/// Sliding session lifetime: refreshed on every state change; idle
+/// sessions die after a week.
+const SESSION_TTL_DAYS: i64 = 7;
 
 pub struct Application {
     port: u16,
@@ -51,32 +68,74 @@ async fn run(
 ) -> Result<Server, anyhow::Error> {
     let db_pool = web::Data::new(db_pool);
 
-    let template_renderer: Box<dyn TemplateRenderer> = Box::new(TeraRenderer::new()?);
-    let template_renderer = web::Data::new(template_renderer);
+    let template_renderer: web::Data<Box<dyn TemplateRenderer>> =
+        web::Data::new(Box::new(TeraRenderer::new()?));
 
-    let storage_backend: Box<dyn StorageBackend> = match configuration.storage.backend.as_str() {
+    let storage: Box<dyn StorageBackend> = match configuration.storage.backend.as_str() {
         "s3" => Box::new(OpendalStorageBackend::new(&configuration.storage)?),
         _ => Box::new(InMemoryStorageBackend::new()),
     };
-    let storage_backend = web::Data::new(storage_backend);
+    let storage_backend = web::Data::new(storage);
+
+    let rate_limiter =
+        web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
+
+    // SessionMiddleware contains Rc internals and must be constructed per
+    // worker inside the closure; the pool-backed store and the signing key
+    // bytes are Send + Clone, so they cross the boundary instead.
+    let session_store = PostgresSessionStore::new(db_pool.get_ref().clone());
+    let secret_key_bytes = configuration
+        .secrets
+        .session_signing_key
+        .expose_secret()
+        .as_bytes()
+        .to_vec();
 
     let server = HttpServer::new(move || {
+        let session_middleware = SessionMiddleware::builder(
+                session_store.clone(),
+                Key::from(&secret_key_bytes),
+            )
+            .session_lifecycle(
+                PersistentSession::default()
+                    .session_ttl(actix_web::cookie::time::Duration::days(SESSION_TTL_DAYS)),
+            )
+            .build();
+
         App::new()
             .wrap(TracingLogger::default())
-            // Liveness lives at the root, outside any future session/auth
-            // middleware: it must stay the cheapest request the server can
-            // answer. Dependency checks live at /api/v1/health.
+            // Identity rides on sessions, so the session middleware sits
+            // underneath it (actix wraps are onion-ordered: first = outer).
+            .wrap(IdentityMiddleware::default())
+            .wrap(session_middleware)
+            // Liveness stays outside the session middlewares' work: it is
+            // mounted here so every wrapped layer is above it in intent,
+            // and its handler touches no state anyway.
             .route("/health_check", web::get().to(health_check))
             .service(
                 web::scope("/api")
-                    .service(web::scope("/v1").route("/health", web::get().to(api::deep_health))),
+                    .service(
+                        web::scope("/v1").route("/health", web::get().to(api::deep_health)),
+                    ),
             )
             .route("/", web::get().to(pages::get_index_page))
+            // Classic form auth: full-page POSTs with SameSite=Lax protection
+            .route("/register", web::get().to(auth::get_register_page))
+            .route("/register", web::post().to(auth::post_register))
+            .route("/login", web::get().to(auth::get_login_page))
+            .route("/login", web::post().to(auth::post_login))
+            .route("/logout", web::post().to(auth::post_logout))
+            // Datastar fragment endpoints live under this scope; every
+            // mutation must carry the Datastar-Request header or 403.
+            .service(
+                web::scope("/fragments").wrap(from_fn(require_datastar_request_header)),
+            )
             .service(ActixFiles::new("/static", "static").prefer_utf8(true))
             .default_service(web::to(pages::not_found))
             .app_data(db_pool.clone())
             .app_data(template_renderer.clone())
             .app_data(storage_backend.clone())
+            .app_data(rate_limiter.clone())
     })
     .listen(listener)?
     .run();

@@ -18,3 +18,6 @@ storage:
   r2_secret_key: ""
 email:
   backend: "noop"
+secrets:
+  # Dev-only signing key. Production MUST override via APP_SECRETS__SESSION_SIGNING_KEY.
+  session_signing_key: "dev-only-key-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

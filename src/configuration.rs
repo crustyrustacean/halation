@@ -12,6 +12,7 @@ pub struct Settings {
     pub database: DatabaseSettings,
     pub storage: StorageSettings,
     pub email: EmailSettings,
+    pub secrets: SecretsSettings,
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -59,6 +60,13 @@ fn default_storage_backend() -> String {
 
 fn default_email_backend() -> String {
     "noop".to_string()
+}
+
+/// Secret material. The dev default lives in base.yaml; production MUST
+/// override via `APP_SECRETS__SESSION_SIGNING_KEY` (>= 64 random bytes).
+#[derive(serde::Deserialize, Clone)]
+pub struct SecretsSettings {
+    pub session_signing_key: SecretString,
 }
 
 impl DatabaseSettings {

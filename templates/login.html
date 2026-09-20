@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth">
+    {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+
+    {% if errors | length > 0 %}
+    <ul class="errors">
+        {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <form method="post" action="/login" class="stack">
+        <label>Username or email
+            <input type="text" name="identifier" value="{{ username }}" required autocomplete="username">
+        </label>
+        <label>Password
+            <input type="password" name="password" required autocomplete="current-password">
+        </label>
+        <button type="submit">Log in</button>
+    </form>
+
+    <p>New here? <a href="/register">Create an account</a></p>
+</section>
+{% endblock %}

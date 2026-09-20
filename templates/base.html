@@ -14,6 +14,12 @@
     </header>
     <nav>
         <a href="/">Home</a>
+        {% if logged_in | default(value=false) %}
+        <form method="post" action="/logout" class="inline-form"><button type="submit" class="link-button">Log out</button></form>
+        {% else %}
+        <a href="/login">Log in</a>
+        <a href="/register">Register</a>
+        {% endif %}
     </nav>
     <main>
         {% block content %}{% endblock %}

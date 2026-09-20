@@ -3,3 +3,12 @@
 body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 40rem; padding: 1rem; }
 header h1 { letter-spacing: -0.02em; }
 nav a { margin-right: 1rem; }
+
+/* auth forms */
+form.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 22rem; }
+form.stack label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
+form.stack input { padding: 0.5rem; border: 1px solid #999; border-radius: 4px; }
+ul.errors { color: #b00020; list-style: none; padding: 0; }
+p.notice { color: #1a7f37; }
+.inline-form { display: inline; }
+.link-button { background: none; border: none; color: #0645ad; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
