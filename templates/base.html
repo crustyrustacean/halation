@@ -15,6 +15,7 @@
     <nav>
         <a href="/">Home</a>
         {% if logged_in | default(value=false) %}
+        <a href="/upload">Upload</a>
         <form method="post" action="/logout" class="inline-form"><button type="submit" class="link-button">Log out</button></form>
         {% else %}
         <a href="/login">Log in</a>

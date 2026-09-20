@@ -5,10 +5,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use uuid::Uuid;
 
 pub struct InMemoryStorageBackend {
-    store: Mutex<HashMap<Uuid, Vec<u8>>>,
+    store: Mutex<HashMap<String, Vec<u8>>>,
 }
 
 impl Default for InMemoryStorageBackend {
@@ -27,35 +26,35 @@ impl InMemoryStorageBackend {
 
 #[async_trait]
 impl StorageBackend for InMemoryStorageBackend {
-    async fn delete(&self, id: Uuid) -> Result<(), StorageError> {
+    async fn delete(&self, key: &str) -> Result<(), StorageError> {
         let mut locked_store = self
             .store
             .lock()
             .map_err(|e| StorageError::Operation(anyhow::anyhow!("Mutex poisoned: {e}")))?;
-        let _ = locked_store.remove(&id);
+        let _ = locked_store.remove(key);
 
         Ok(())
     }
 
-    async fn find(&self, id: Uuid) -> Result<Bytes, StorageError> {
+    async fn find(&self, key: &str) -> Result<Bytes, StorageError> {
         let locked_store = self
             .store
             .lock()
             .map_err(|e| StorageError::Operation(anyhow::anyhow!("Mutex poisoned: {e}")))?;
-        let result = locked_store.get(&id);
+        let result = locked_store.get(key);
 
-        match result.ok_or_else(|| StorageError::NotFound("No value with that key.".to_string())) {
+        match result.ok_or_else(|| StorageError::NotFound(format!("No value at key: {key}"))) {
             Ok(b) => Ok(Bytes::copy_from_slice(b.as_slice())),
             Err(e) => Err(e),
         }
     }
 
-    async fn save(&self, id: Uuid, bytes: Bytes) -> Result<(), StorageError> {
+    async fn save(&self, key: &str, bytes: Bytes) -> Result<(), StorageError> {
         let mut locked_store = self
             .store
             .lock()
             .map_err(|e| StorageError::Operation(anyhow::anyhow!("Mutex poisoned: {e}")))?;
-        let _ = locked_store.insert(id, bytes.to_vec());
+        let _ = locked_store.insert(key.to_string(), bytes.to_vec());
 
         Ok(())
     }
@@ -81,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_find_on_missing_id_returns_not_found() {
-        contract::find_on_missing_id_returns_not_found(&InMemoryStorageBackend::new()).await;
+        contract::find_on_missing_key_returns_not_found(&InMemoryStorageBackend::new()).await;
     }
 
     #[tokio::test]
@@ -91,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_delete_on_missing_id_is_idempotent() {
-        contract::delete_on_missing_id_is_idempotent(&InMemoryStorageBackend::new()).await;
+        contract::delete_on_missing_key_is_idempotent(&InMemoryStorageBackend::new()).await;
     }
 
     // NOTE on `save`: there is no meaningful unhappy path for the in-memory

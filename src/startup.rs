@@ -5,7 +5,8 @@ use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::guards::require_datastar_request_header;
 use actix_web::middleware::from_fn;
-use crate::routes::{api, auth, health_check, pages};
+use crate::routes::{api, auth, health_check, media_serving, pages, upload};
+use crate::routes::upload::UPLOAD_LIMIT_BYTES;
 use crate::services::RateLimiter;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
 use crate::template::{TemplateRenderer, tera::TeraRenderer};
@@ -125,6 +126,11 @@ async fn run(
             .route("/login", web::get().to(auth::get_login_page))
             .route("/login", web::post().to(auth::post_login))
             .route("/logout", web::post().to(auth::post_logout))
+            // MVP composer + post permalink (Phase 2)
+            .route("/upload", web::get().to(upload::get_upload_page))
+            .route("/upload", web::post().to(upload::post_upload))
+            .route("/p/{post_id}", web::get().to(upload::get_post_page))
+            .route("/media/{media_id}/{variant}", web::get().to(media_serving::get_media_derivative))
             // Datastar fragment endpoints live under this scope; every
             // mutation must carry the Datastar-Request header or 403.
             .service(
@@ -136,6 +142,10 @@ async fn run(
             .app_data(template_renderer.clone())
             .app_data(storage_backend.clone())
             .app_data(rate_limiter.clone())
+            .app_data(
+                actix_multipart::form::MultipartFormConfig::default()
+                    .total_limit(UPLOAD_LIMIT_BYTES),
+            )
     })
     .listen(listener)?
     .run();

@@ -5,7 +5,6 @@ use actix_web::{ResponseError, http::StatusCode};
 use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
-use uuid::Uuid;
 
 mod in_memory;
 mod opendal;
@@ -37,11 +36,14 @@ impl ResponseError for StorageError {
     }
 }
 
+/// Object storage behind path keys. A media asset owns a small family of
+/// keys — `{media_id}/original.{ext}`, `{media_id}/thumb.jpg`, … — so keys
+/// are paths, not bare ids.
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    async fn delete(&self, id: Uuid) -> Result<(), StorageError>;
-    async fn find(&self, id: Uuid) -> Result<Bytes, StorageError>;
-    async fn save(&self, id: Uuid, bytes: Bytes) -> Result<(), StorageError>;
+    async fn delete(&self, key: &str) -> Result<(), StorageError>;
+    async fn find(&self, key: &str) -> Result<Bytes, StorageError>;
+    async fn save(&self, key: &str, bytes: Bytes) -> Result<(), StorageError>;
 
     /// Cheap connectivity probe for the deep health endpoint. The default
     /// suits backends with no remote failure mode (the in-memory fake);
@@ -55,32 +57,29 @@ pub trait StorageBackend: Send + Sync {
 #[cfg(test)]
 pub mod contract {
     //! Shared behavioral contract for any `StorageBackend` implementation.
-    //!
-    //! Each function exercises a guarantee that *every* backend must honor —
-    //! the in-memory fake today, the OpenDAL S3/R2 impl in production. Writing
-    //! the assertions once here avoids duplicate logic drifting across impls.
 
     use super::*;
+    use uuid::Uuid;
 
     pub async fn save_then_find_round_trips<S: StorageBackend>(storage: &S) {
-        // Arrange — a fresh id and some arbitrary bytes
-        let id = Uuid::new_v4();
+        // Arrange — a fresh key and some arbitrary bytes
+        let key = Uuid::new_v4().to_string();
         let bytes = Bytes::from_static(&[1, 2, 3, 4]);
 
         // Act — save then read back
-        storage.save(id, bytes.clone()).await.unwrap();
-        let found = storage.find(id).await.unwrap();
+        storage.save(&key, bytes.clone()).await.unwrap();
+        let found = storage.find(&key).await.unwrap();
 
         // Assert — the bytes round-trip intact
         assert_eq!(found, bytes);
     }
 
-    pub async fn find_on_missing_id_returns_not_found<S: StorageBackend>(storage: &S) {
-        // Arrange — a fresh id that was never saved
-        let missing_id = Uuid::new_v4();
+    pub async fn find_on_missing_key_returns_not_found<S: StorageBackend>(storage: &S) {
+        // Arrange — a fresh key that was never saved
+        let missing_key = Uuid::new_v4().to_string();
 
         // Act — attempt to find it
-        let result = storage.find(missing_id).await;
+        let result = storage.find(&missing_key).await;
 
         // Assert — the backend reports NotFound, not a generic error
         assert!(matches!(result, Err(StorageError::NotFound(_))));
@@ -88,23 +87,26 @@ pub mod contract {
 
     pub async fn delete_removes_stored_bytes<S: StorageBackend>(storage: &S) {
         // Arrange — save some bytes so there is something to delete
-        let id = Uuid::new_v4();
-        storage.save(id, Bytes::from_static(&[1])).await.unwrap();
+        let key = Uuid::new_v4().to_string();
+        storage
+            .save(&key, Bytes::from_static(&[1]))
+            .await
+            .unwrap();
 
         // Act — delete, then attempt to find
-        storage.delete(id).await.unwrap();
-        let result = storage.find(id).await;
+        storage.delete(&key).await.unwrap();
+        let result = storage.find(&key).await;
 
         // Assert — the bytes are gone
         assert!(matches!(result, Err(StorageError::NotFound(_))));
     }
 
-    pub async fn delete_on_missing_id_is_idempotent<S: StorageBackend>(storage: &S) {
-        // Arrange — a fresh id that was never saved
-        let missing_id = Uuid::new_v4();
+    pub async fn delete_on_missing_key_is_idempotent<S: StorageBackend>(storage: &S) {
+        // Arrange — a fresh key that was never saved
+        let missing_key = Uuid::new_v4().to_string();
 
         // Act — delete it anyway
-        let result = storage.delete(missing_id).await;
+        let result = storage.delete(&missing_key).await;
 
         // Assert — the backend does not treat a missing key as an error
         assert!(result.is_ok());

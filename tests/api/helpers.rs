@@ -67,6 +67,37 @@ pub async fn spawn_app() -> TestApp {
     test_app
 }
 
+/// Register a fresh user and return their session cookie string.
+pub async fn register_and_login(
+    app: &TestApp,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> String {
+    app.api_client
+        .post(&format!("{}/register", &app.address))
+        .form(&[("username", username), ("email", email), ("password", password)])
+        .send()
+        .await
+        .expect("registration should succeed");
+
+    let login = app
+        .api_client
+        .post(&format!("{}/login", &app.address))
+        .form(&[("identifier", username), ("password", password)])
+        .send()
+        .await
+        .expect("login should succeed");
+
+    login
+        .headers()
+        .get_all("Set-Cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
     // Create database
     let maintenance_settings = DatabaseSettings {

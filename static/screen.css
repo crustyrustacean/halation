@@ -12,3 +12,10 @@ ul.errors { color: #b00020; list-style: none; padding: 0; }
 p.notice { color: #1a7f37; }
 .inline-form { display: inline; }
 .link-button { background: none; border: none; color: #0645ad; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+
+/* posts */
+img.solo { max-width: 100%; border-radius: 8px; }
+.photo-set { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.photo-set img { width: 100%; height: auto; display: block; }
+.caption { font-size: 15px; line-height: 1.55; }
+.meta { color: #777; font-size: 13px; }

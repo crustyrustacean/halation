@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<article class="post">
+    {% if media | length > 1 %}
+    <div class="photo-set">
+        {% for m in media %}<img src="/media/{{ m.media_id }}/medium" alt="Photo {{ loop.index }}">{% endfor %}
+    </div>
+    {% else %}
+    {% for m in media %}<img class="solo" src="/media/{{ m.media_id }}/medium" alt="Photo">{% endfor %}
+    {% endif %}
+
+    <p class="caption">{% if caption %}{{ caption }}{% endif %}</p>
+    <p class="meta">by <a href="/u/{{ username }}">{{ username }}</a> · {{ created_at }}</p>
+</article>
+{% endblock %}

@@ -2,6 +2,33 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.3.0] - 2026-09-20
+
+### Phase 2 — Media pipeline + MVP composer (login → upload → see your photo)
+
+- **Migrations**: `media` (owner, kind, storage_key, mime, dimensions,
+  size, sha256, `exif` JSONB) + `media_derivatives` (thumb/medium/large) +
+  `posts` + `post_media` (photo sets, positions preserved)
+- **Media pipeline** (`services::media`): sniff (JPEG/PNG/WebP native, HEIC
+  via `heic` crate conversion), decode, EXIF extraction (Make/Model/Lens,
+  DateTimeOriginal, ƒ/, exposure, ISO, focal length, GPS → decimal) into
+  `media.exif` JSONB, sha256, derivatives at JPEG q85 — thumb 300×300 cover
+  crop, medium 640 / large 1080 long-edge caps with no upscaling; every
+  derivative is EXIF-free by construction (privacy by pipeline)
+- **Storage keys**: `StorageBackend` evolved from Uuid keys to path keys
+  (`{media_id}/original.{ext}`, `{media_id}/{variant}.jpg`); contract tests
+  follow
+- **Composer** (`GET/POST /upload`, auth-gated): multipart, up to 4 images
+  + caption, 50 MB request cap, per-transaction media + post persistence
+- **Permalink** (`GET /p/{post_id}`): photo set (2-up grid, mockup-style)
+  + caption + owner + date
+- **Serving** (`GET /media/{id}/{variant}`): public thumb/medium/large with
+  immutable cache headers; `original` is never publicly served (it carries
+  EXIF/GPS) — 404 by design
+- 43 tests green (25 lib incl. HEIC fixture + hand-built EXIF segment +
+  derivative contracts; 18 API incl. upload round-trip, auth gates, 422
+  rejection, original-never-served, photo sets)
+
 ## [0.2.0] - 2026-09-20
 
 ### Phase 1 — Authentication

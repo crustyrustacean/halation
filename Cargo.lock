@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "halation"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "actix-cors",
  "actix-files",
@@ -1798,6 +1798,7 @@ dependencies = [
  "serde",
  "serde-aux",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "tera",
  "thiserror",
@@ -3745,6 +3746,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
