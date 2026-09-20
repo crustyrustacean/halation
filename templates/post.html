@@ -4,13 +4,26 @@
 <article class="post">
     {% if media | length > 1 %}
     <div class="photo-set">
-        {% for m in media %}<img src="/media/{{ m.media_id }}/medium" alt="Photo {{ loop.index }}">{% endfor %}
+        {% for m in media %}<img src="/media/{{ m.media_id }}/medium" alt="Photo">{% endfor %}
     </div>
     {% else %}
     {% for m in media %}<img class="solo" src="/media/{{ m.media_id }}/medium" alt="Photo">{% endfor %}
     {% endif %}
 
+    {% for m in media %}{% if m.exif %}
+    <div class="meta">
+        {% if m.exif.make %}<span>{{ m.exif.make }}{% if m.exif.model %} {{ m.exif.model }}{% endif %}</span>{% endif %}
+        {% if m.exif.date_time_original %}<span>{{ m.exif.date_time_original }}</span>{% endif %}
+        {% if m.exif.focal_length %}<span>{{ m.exif.focal_length }}</span>{% endif %}
+        {% if m.exif.f_number %}<span>{{ m.exif.f_number }}</span>{% endif %}
+        {% if m.exif.exposure_time %}<span>{{ m.exif.exposure_time }}s</span>{% endif %}
+        {% if m.exif.iso %}<span>ISO {{ m.exif.iso }}</span>{% endif %}
+        {% if m.exif.gps_latitude %}<span>{{ m.exif.gps_latitude }}, {{ m.exif.gps_longitude }}</span>{% endif %}
+    </div>
+    {% endif %}{% endfor %}
+
     <p class="caption">{{ caption | default(value="") }}</p>
-    <p class="meta">by <a href="/u/{{ username }}">{{ username }}</a> · {{ created_at }}</p>
+    {% if hashtags %}<p class="tags">{% for t in hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}
+    <p class="meta">by <a href="/u/{{ username }}">{{ username }}</a> · {{ created_at_display }}</p>
 </article>
 {% endblock %}

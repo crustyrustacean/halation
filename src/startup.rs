@@ -5,7 +5,7 @@ use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::guards::require_datastar_request_header;
 use actix_web::middleware::from_fn;
-use crate::routes::{api, auth, health_check, media_serving, pages, upload};
+use crate::routes::{api, auth, feed, health_check, media_serving, pages, profile, upload};
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
 use crate::services::RateLimiter;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
@@ -170,7 +170,10 @@ async fn run(
                         web::scope("/v1").route("/health", web::get().to(api::deep_health)),
                     ),
             )
-            .route("/", web::get().to(pages::get_index_page))
+            .route("/", web::get().to(feed::get_feed))
+            .route("/recent", web::get().to(feed::get_recent))
+            .route("/u/{username}", web::get().to(profile::get_profile))
+            .route("/hashtags/{tag}", web::get().to(feed::get_hashtag_feed))
             // Classic form auth: full-page POSTs with SameSite=Lax protection
             .route("/register", web::get().to(auth::get_register_page))
             .route("/register", web::post().to(auth::post_register))
@@ -185,7 +188,9 @@ async fn run(
             // Datastar fragment endpoints live under this scope; every
             // mutation must carry the Datastar-Request header or 403.
             .service(
-                web::scope("/fragments").wrap(from_fn(require_datastar_request_header)),
+                web::scope("/fragments")
+                    .route("/feed", web::get().to(feed::feed_fragment))
+                    .wrap(from_fn(require_datastar_request_header)),
             )
             .service(ActixFiles::new("/static", "static").prefer_utf8(true))
             .default_service(web::to(pages::not_found))

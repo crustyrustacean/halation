@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS post_hashtags;
+DROP TABLE IF EXISTS hashtags;

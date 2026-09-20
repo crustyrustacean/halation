@@ -2,6 +2,32 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.5.0] - 2026-09-20
+
+### Phase 3 — the app becomes browsable
+
+- **Migrations**: `hashtags` + `post_hashtags` (CITEXT tags, cascade delete)
+- **Hashtag parsing**: `#tag` tokens extracted from captions on post
+  creation (lowercase, deduped, checked-constrained at the DB), rendered
+  as links on cards and permalinks
+- **Feed pages**: `/` (global timeline until follows land in Phase 5) and
+  `/recent` — post cards (photo / photo-set / caption / tags / owner /
+  date) with **keyset cursor pagination**, never OFFSET
+- **Load-more fragment**: `GET /fragments/feed?before={post_id}` — first
+  customer of the CSRF-guarded `/fragments` scope; returns a Datastar SSE
+  stream of two patches: cards inserted before the button, button
+  replaced with the next cursor (or removed when exhausted)
+- **Profile pages**: `/u/{username}` — identity card (avatar initial,
+  display name, bio, post count, joined date) over a 3-column thumbnail
+  grid; backed by the read-only `ProfileView` (no email, no hash);
+  unknown accounts get a styled 404
+- **Hashtag pages**: `/hashtags/{tag}`
+- **EXIF meta row** on permalinks: camera, lens, date, ƒ/, exposure, ISO,
+  focal length, GPS decimal degrees — rendered from `media.exif`
+- 58 tests green (28 lib incl. hashtag parser + pipeline contracts;
+  30 API incl. feed chronology, fragment pagination + exhaustion, hashtag
+  flow, profile grid isolation, EXIF meta row via committed fixture)
+
 ## [0.4.0] - 2026-09-20
 
 ### Added — self-bootstrapping database

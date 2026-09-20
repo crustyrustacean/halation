@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "halation"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "actix-cors",
  "actix-files",
@@ -1803,6 +1803,7 @@ dependencies = [
  "tera",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-actix-web",
  "tracing-bunyan-formatter",

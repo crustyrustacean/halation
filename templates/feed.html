@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="feed-title">{{ sub_header }}</h2>
+<div id="feed">
+    {% for post in posts %}{% include "partials/post_card.html" %}{% endfor %}
+    {% if posts | length == 0 %}<p class="empty">No posts yet. The light is waiting.</p>{% endif %}
+</div>
+{% include "partials/load_more.html" %}
+{% endblock %}

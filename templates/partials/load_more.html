@@ -1,0 +1,5 @@
+<div id="load-more-zone">
+{% if load_more_before %}
+<button id="load-more" class="load-more" data-on-click="@get('/fragments/feed?before={{ load_more_before }}')">Load more posts</button>
+{% endif %}
+</div>

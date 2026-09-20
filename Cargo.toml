@@ -1,6 +1,6 @@
 [package]
 name = "halation"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 authors = ["Jeffery D. Mitchell", "<crusty.rustacean@gmail.com>"]
 description = "An early-Instagram-style photo sharing server — chronological, calm, and ad-free"
@@ -49,6 +49,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 tera = { version = "2.1", features = ["fast", "glob_fs"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-actix-web = "0.7"
 tracing-log = "0.2"

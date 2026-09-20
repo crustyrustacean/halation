@@ -4,6 +4,7 @@
 pub mod authentication;
 pub mod configuration;
 pub mod guards;
+pub mod posts;
 pub mod routes;
 pub mod services;
 pub mod startup;

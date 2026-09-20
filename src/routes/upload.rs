@@ -1,6 +1,7 @@
 // src/routes/upload.rs
 
 // dependencies
+use crate::posts;
 use crate::services::media::{self, MediaError};
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
@@ -104,14 +105,9 @@ pub async fn post_upload(
     // single transaction so a half-uploaded post can never exist.
     let mut tx = pool.begin().await.map_err(|e| crate::utils::e500(e))?;
 
-    let post_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO posts (user_id, caption) VALUES ($1, $2) RETURNING id",
-    )
-    .bind(user_id)
-    .bind(&caption)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| crate::utils::e500(e))?;
+    let post_id = posts::create_post(&mut *tx, user_id, &caption)
+        .await
+        .map_err(|e| crate::utils::e500(e))?;
 
     for (position, file) in form.files.iter().enumerate() {
         let raw = std::fs::read(file.file.path())
@@ -154,25 +150,8 @@ pub async fn post_upload(
         .finish())
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct PostMediaView {
-    pub media_id: Uuid,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct PostPageContext {
-    pub title: String,
-    pub header: &'static str,
-    pub sub_header: &'static str,
-    pub logged_in: bool,
-    pub post_id: Uuid,
-    pub caption: Option<String>,
-    pub username: String,
-    pub created_at: String,
-    pub media: Vec<PostMediaView>,
-}
-
-/// GET /p/{post_id} — the post permalink: photo set + caption + owner.
+/// GET /p/{post_id} — the post permalink: photo set + caption + owner +
+/// EXIF meta row (loaded via `posts::load_post_page`).
 pub async fn get_post_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     pool: web::Data<sqlx::PgPool>,
@@ -181,61 +160,29 @@ pub async fn get_post_page(
 ) -> Result<HttpResponse, Error> {
     let post_id = path.into_inner();
 
-    let row: Option<(Uuid, Option<String>, String, chrono::DateTime<chrono::Utc>)> =
-        sqlx::query_as(
-            "SELECT p.id, p.caption, u.username::text, p.created_at
-             FROM posts p JOIN users u ON u.id = p.user_id
-             WHERE p.id = $1",
-        )
-        .bind(post_id)
-        .fetch_optional(pool.get_ref())
+    match crate::posts::load_post_page(pool.get_ref(), post_id)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(|e| crate::utils::e500(e))?
+    {
+        Some(page) => {
+            let mut context = serde_json::to_value(&page)?;
+            context["title"] = serde_json::json!("Post");
+            context["header"] = serde_json::json!("Halation");
+            context["sub_header"] = serde_json::json!("A post.");
+            context["logged_in"] = serde_json::json!(identity.is_some());
 
-    let Some((id, caption, username, created_at)) = row else {
-        return Ok(pages_not_found(&templates, identity).await);
-    };
-
-    let media_ids: Vec<(Uuid, i32)> = sqlx::query_as(
-        "SELECT media_id, position FROM post_media WHERE post_id = $1 ORDER BY position",
-    )
-    .bind(post_id)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| crate::utils::e500(e))?;
-
-    let context = PostPageContext {
-        title: "Post".into(),
-        header: "Halation",
-        sub_header: "A post.",
-        logged_in: identity.is_some(),
-        post_id: id,
-        caption,
-        username,
-        created_at: created_at.format("%b %e, %Y").to_string(),
-        media: media_ids
-            .into_iter()
-            .map(|(media_id, _)| PostMediaView { media_id })
-            .collect(),
-    };
-
-    let body = templates.render("post.html", &serde_json::to_value(&context)?)?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(body))
-}
-
-async fn pages_not_found(
-    templates: &web::Data<Box<dyn TemplateRenderer>>,
-    identity: Option<Identity>,
-) -> HttpResponse {
-    let context = serde_json::json!({
-        "title": "Not found",
-        "header": "404",
-        "sub_header": "That post doesn't exist (or isn't yours to see).",
-        "logged_in": identity.is_some(),
-    });
-
-    match templates.render("error.html", &context) {
-        Ok(body) => HttpResponse::NotFound().content_type("text/html").body(body),
-        Err(_) => HttpResponse::NotFound().finish(),
+            let body = templates.render("post.html", &context)?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(body))
+        }
+        None => {
+            let context = serde_json::json!({
+                "title": "Not found",
+                "header": "404",
+                "sub_header": "That post doesn't exist (or isn't yours to see).",
+                "logged_in": identity.is_some(),
+            });
+            let body = templates.render("error.html", &context)?;
+            Ok(HttpResponse::NotFound().content_type("text/html").body(body))
+        }
     }
 }
