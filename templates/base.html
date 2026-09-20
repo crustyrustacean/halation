@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="/static/screen.css" media="screen">
+    <script type="module" src="/static/datastar.js"></script>
+    <title>Halation | {{ title }}</title>
+</head>
+<body>
+    <header>
+        <h1>{{ header }}</h1>
+        <h2>{{ sub_header }}</h2>
+    </header>
+    <nav>
+        <a href="/">Home</a>
+    </nav>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>Halation — chronological, calm, ad-free.</p>
+    </footer>
+</body>
+</html>

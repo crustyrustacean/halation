@@ -1,0 +1,20 @@
+application:
+  port: 8000
+  host: 0.0.0.0
+  base_url: "http://localhost:8000"
+database:
+  host: "127.0.0.1"
+  port: 5433
+  username: "postgres"
+  password: "password"
+  database_name: "halation"
+  require_ssl: false
+storage:
+  backend: "memory"
+  fs_root: ""
+  r2_bucket: ""
+  r2_endpoint: ""
+  r2_access_key: ""
+  r2_secret_key: ""
+email:
+  backend: "noop"
