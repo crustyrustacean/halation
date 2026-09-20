@@ -12,12 +12,17 @@ Tera rendering, health endpoints. No features yet.
 
 ## Development
 
-Tests need a local Postgres 17 (the harness creates a throwaway database per test):
+Start the dev database (once), then run migrations:
 
 ```sh
 docker run -d --name halation-db-1 -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=password -p 5433:5432 postgres:17
-cargo test
+scripts/init_dev_db.sh            # creates `halation` + applies migrations
+scripts/init_dev_db.sh --clean    # also sweeps throwaway test databases
 ```
+
+Then `cargo run` and visit http://127.0.0.1:8000. Tests
+(`cargo test`) spin up their own throwaway databases per test and
+need the same container running.
 
 `DATABASE_URL` in `.env` points at `localhost:5433` for sqlx-cli.

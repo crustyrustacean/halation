@@ -10,11 +10,11 @@
 
     <form method="post" action="/register" class="stack">
         <label>Username
-            <input type="text" name="username" value="{{ username }}" required
+            <input type="text" name="username" value="{{ username | default(value='') }}" required
                    minlength="3" maxlength="30" autocomplete="username">
         </label>
         <label>Email
-            <input type="email" name="email" value="{{ email }}" required autocomplete="email">
+            <input type="email" name="email" value="{{ email | default(value='') }}" required autocomplete="email">
         </label>
         <label>Password
             <input type="password" name="password" required minlength="8" autocomplete="new-password">

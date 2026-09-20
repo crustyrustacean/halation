@@ -16,6 +16,59 @@ fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn upload_page_renders_when_logged_in() {
+    // Arrange — covers the logged-in nav branch AND the page's context
+    // completeness (the errors list is absent on a fresh GET)
+    let app = spawn_app().await;
+    let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/upload", &app.address))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert
+    assert_eq!(200, response.status().as_u16());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("Photos"), "the composer form renders");
+    assert!(body.contains("Log out"), "nav shows the logged-in branch");
+}
+
+#[tokio::test]
+async fn permalink_without_caption_renders() {
+    // Arrange — a post with a NULL caption, inserted directly
+    let app = spawn_app().await;
+    let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = 'jeff'")
+        .fetch_one(&app.db_pool)
+        .await
+        .unwrap();
+    let post_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO posts (user_id, caption) VALUES ($1, NULL) RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/p/{post_id}", &app.address))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert — a caption-less post renders without a template error
+    assert_eq!(200, response.status().as_u16());
+}
+
+#[tokio::test]
 async fn upload_requires_login() {
     // Arrange
     let app = spawn_app().await;

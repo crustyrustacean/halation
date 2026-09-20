@@ -16,6 +16,63 @@ fn login_form<'a>(identifier: &'a str, password: &'a str) -> [(&'a str, &'a str)
 }
 
 #[tokio::test]
+async fn login_page_renders_fresh() {
+    // Arrange
+    let app = spawn_app().await;
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/login", &app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert — a bare GET (no form data in context) must render, not 500
+    assert_eq!(200, response.status().as_u16());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("Welcome back"));
+}
+
+#[tokio::test]
+async fn login_page_renders_the_registration_notice() {
+    // Arrange
+    let app = spawn_app().await;
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/login?registered=1", &app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert
+    assert_eq!(200, response.status().as_u16());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("Account created"));
+}
+
+#[tokio::test]
+async fn register_page_renders_fresh() {
+    // Arrange
+    let app = spawn_app().await;
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/register", &app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert — bare GET must render without form data in context
+    assert_eq!(200, response.status().as_u16());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("Create your account"));
+}
+
+#[tokio::test]
 async fn register_creates_account_and_redirects_to_login() {
     // Arrange
     let app = spawn_app().await;

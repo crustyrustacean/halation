@@ -2,6 +2,26 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.3.1] - 2026-09-20
+
+### Fixed
+
+- **Template rendering on bare GETs**: Tera 2 errors when rendering an
+  undefined variable, and `GET /register`, `GET /login` and `GET /upload`
+  never rendered in tests (every auth test asserted redirects or error
+  paths) — so `{{ username }}`, `{{ email }}` and the unpassed `errors`
+  list 500'd every fresh page visit. Templates now carry `default` filters
+  and handlers pass complete contexts.
+- **Dev database missing**: the `halation` database didn't exist in the
+  docker container (tests create throwaway DBs; nothing created the dev
+  one). `scripts/init_dev_db.sh` now creates + migrates it (idempotent,
+  psql-only — no sqlx-cli), with `--clean` to sweep throwaway test
+  databases. README documents the flow; `.env` aligned to `halation`.
+- 48 tests green (5 new page-render tests covering every route and state:
+  fresh login/register pages, registered notice, upload page logged in,
+  permalink without caption). Verified end-to-end via curl: register →
+  login → upload → permalink → derivative serving.
+
 ## [0.3.0] - 2026-09-20
 
 ### Phase 2 — Media pipeline + MVP composer (login → upload → see your photo)

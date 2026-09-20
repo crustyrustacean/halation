@@ -12,7 +12,7 @@
 
     <form method="post" action="/login" class="stack">
         <label>Username or email
-            <input type="text" name="identifier" value="{{ username }}" required autocomplete="username">
+            <input type="text" name="identifier" value="{{ username | default(value='') }}" required autocomplete="username">
         </label>
         <label>Password
             <input type="password" name="password" required autocomplete="current-password">

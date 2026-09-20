@@ -42,6 +42,7 @@ pub async fn get_upload_page(
         "sub_header": "New photo post.",
         "logged_in": true,
         "username": identity.id().unwrap_or_default(),
+        "errors": [],
     });
 
     let body = templates.render("upload.html", &context)?;

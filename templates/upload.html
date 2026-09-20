@@ -2,7 +2,7 @@
 
 {% block content %}
 <section class="auth">
-    {% if errors | length > 0 %}
+    {% if errors | default(value=[]) | length > 0 %}
     <ul class="errors">
         {% for error in errors %}<li>{{ error }}</li>{% endfor %}
     </ul>
