@@ -2,6 +2,23 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.4.0] - 2026-09-20
+
+### Added — self-bootstrapping database
+
+- **`cargo run` on a fresh machine now just works**: on boot the app
+  creates its database if missing (SQLSTATE 3D000 → CREATE DATABASE via
+  the maintenance connection), applies all migrations (sqlx-tracked,
+  idempotent), and fails fast with an actionable message when Postgres
+  itself is unreachable — no more silent lazy-pool 500s.
+- **`scripts/init_dev_db.sh` hardened**: creates or starts the dev
+  container, waits for readiness, and — deliberately — no longer applies
+  migrations itself. Applying them twice (script + app) broke boot with
+  "relation users already exists"; migrations belong to the app now.
+- New integration test: building against a nonexistent database
+  bootstraps it fully (create + migrate + serve).
+- README documents the two-command flow.
+
 ## [0.3.1] - 2026-09-20
 
 ### Fixed

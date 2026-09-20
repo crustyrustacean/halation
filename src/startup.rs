@@ -9,6 +9,7 @@ use crate::routes::{api, auth, health_check, media_serving, pages, upload};
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
 use crate::services::RateLimiter;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
+use anyhow::Context as _;
 use crate::template::{TemplateRenderer, tera::TeraRenderer};
 use actix_files::Files as ActixFiles;
 use actix_identity::IdentityMiddleware;
@@ -19,7 +20,7 @@ use actix_web::dev::Server;
 use actix_web::{App, HttpServer, web};
 use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{Connection, PgPool};
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
 
@@ -38,7 +39,17 @@ pub struct Application {
 
 impl Application {
     pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
+        // Fail fast and self-heal: create the database if it doesn't exist
+        // and apply migrations, so `cargo run` works on a fresh machine.
+        ensure_database_exists(&configuration.database).await?;
+
         let connection_pool = get_connection_pool(&configuration.database);
+        sqlx::migrate!("./migrations")
+            .run(&connection_pool)
+            .await
+            .context("Failed to run database migrations")?;
+        tracing::info!("database ready; migrations up to date");
+
         let address = format!(
             "{}:{}",
             configuration.application.host, configuration.application.port
@@ -60,6 +71,46 @@ impl Application {
 
 pub fn get_connection_pool(configuration: &DatabaseSettings) -> PgPool {
     PgPoolOptions::new().connect_lazy_with(configuration.connect_options())
+}
+
+/// Create the configured database if it does not exist yet. A connection
+/// failure that is *not* "database does not exist" (SQLSTATE 3D000) is
+/// surfaced with actionable context — e.g. Postgres not running at all.
+async fn ensure_database_exists(settings: &DatabaseSettings) -> Result<(), anyhow::Error> {
+    match sqlx::PgConnection::connect_with(&settings.connect_options()).await {
+        // Database exists and accepts our credentials.
+        Ok(conn) => {
+            conn.close().await.context("Failed to close probe connection")?;
+            Ok(())
+        }
+        Err(e) => {
+            let missing = matches!(&e, sqlx::Error::Database(db)
+                if db.code().as_deref() == Some("3D000"));
+
+            if !missing {
+                return Err(anyhow::anyhow!(
+                    "Failed to connect to Postgres at {}:{} as {} — is the dev \
+                     container running? (scripts/init_dev_db.sh starts it.)\n\t{e}",
+                    settings.host, settings.port, settings.username
+                ));
+            }
+
+            // Create the database through the maintenance connection.
+            let maintenance = DatabaseSettings {
+                database_name: "postgres".to_string(),
+                ..settings.clone()
+            };
+            let mut conn = sqlx::PgConnection::connect_with(&maintenance.connect_options())
+                .await
+                .context("Failed to connect to the Postgres maintenance database")?;
+            sqlx::query(&format!(r#"CREATE DATABASE "{}""#, settings.database_name))
+                .execute(&mut conn)
+                .await
+                .context("Failed to create the application database")?;
+            tracing::info!("created database {}", settings.database_name);
+            Ok(())
+        }
+    }
 }
 
 async fn run(

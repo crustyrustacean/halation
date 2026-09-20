@@ -1,6 +1,7 @@
 // tests/api
 
 mod auth;
+mod bootstrap;
 mod deep_health;
 mod health_check;
 mod helpers;
