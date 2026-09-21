@@ -85,6 +85,7 @@ p.empty { color: var(--muted); padding: 2rem 0; text-align: center; }
    ------------------------------------------------------------ */
 
 article.post {
+    position: relative; /* anchors the location chip over the photo */
     background: var(--card);
     border-radius: var(--radius);
     overflow: hidden;
@@ -95,7 +96,7 @@ article.post img { width: 100%; }
 .photo-set { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
 .photo-set img { height: 100%; object-fit: cover; }
 
-.post-body { padding: 14px 18px 4px; }
+.post-body { padding: 14px 18px 16px; }
 .caption { font-size: 15px; line-height: 1.55; color: var(--text-soft); }
 
 .tags { margin-top: 10px; font-size: 13px; line-height: 1.9; }
@@ -113,19 +114,25 @@ article.post img { width: 100%; }
 /* EXIF meta row */
 .meta {
     display: flex; flex-wrap: wrap; gap: 6px 14px;
-    margin-top: 12px; padding-top: 10px;
+    margin-top: 12px; padding: 10px 18px 4px;
     border-top: 1px solid var(--line);
     color: var(--muted); font-size: 12.5px;
 }
+.profile .meta { padding: 0; }
 .meta span { display: inline-flex; align-items: center; white-space: nowrap; }
 
 /* location chip */
 .chip {
+    position: absolute; top: 12px; left: 12px; z-index: 2;
     display: inline-flex; align-items: center; gap: 6px;
-    background: #eef4fa; color: #33566b;
+    background: rgba(0, 25, 53, .55); backdrop-filter: blur(4px);
+    color: #fff;
     font-size: 12px; font-weight: 600;
-    padding: 4px 10px; border-radius: 999px;
-    margin-bottom: 8px;
+    padding: 5px 11px; border-radius: 999px;
+}
+.chip::before {
+    content: ""; width: 6px; height: 6px;
+    background: var(--gold); border-radius: 50%;
 }
 .chip::before {
     content: ""; width: 6px; height: 6px;

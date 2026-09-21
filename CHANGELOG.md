@@ -56,6 +56,24 @@ Bump to 0.9.0 — the storage config surface changed shape.
   self-creates when the user has rights); `APP_DATABASE__REQUIRE_SSL`
   defaults true in production and DO managed Postgres supports it
 
+## [0.7.1] - 2026-09-21
+
+### Fixed — card layout breathing room
+
+- **Permalink page**: the location chip, caption, and tags rendered bare
+  inside the card with no padding at all (the `.post-body` wrapper only
+  existed on feed cards) — they now share the same padded body block.
+- **Feed cards**: bumped the post body's bottom padding (4px → 16px) so
+  captions and tags no longer hug the footer divider.
+- **EXIF meta rows** now carry horizontal padding on permalinks instead
+  of running edge-to-edge.
+- **Location chip** now overlays the photo (top-left, translucent navy,
+  gold dot) exactly like the mockup, instead of floating orphaned in the
+  card flow. Rotate response keeps the buttons alive across replacements
+  (context carried `can_rotate` through).
+
+Cosmetic only — all 65 tests pass unchanged.
+
 ## [0.7.0] - 2026-09-20
 
 ### Added — beauty pass: the design contract lands

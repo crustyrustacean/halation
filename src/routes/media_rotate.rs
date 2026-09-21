@@ -99,7 +99,7 @@ pub async fn rotate_media(
         .map_err(|e| crate::utils::e500(e))?;
     let media = page.ok_or_else(|| crate::utils::e500("rotated media has no post"))?;
 
-    let block = serde_json::json!({ "media": media });
+    let block = serde_json::json!({ "media": media, "can_rotate": true });
     let block_html = templates.render("partials/post_media_block.html", &block)?;
     Ok(Either::Right(Sse::from(
         PatchElements::new(block_html)

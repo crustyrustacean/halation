@@ -6,9 +6,11 @@
         {% include "partials/post_media_block.html" %}
     </div>
 
-    {% if location_name %}<p class="chip">{{ location_name }}</p>{% endif %}
-    <p class="caption">{{ caption | default(value="") }}</p>
-    {% if hashtags %}<p class="tags">{% for t in hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}
+    <div class="post-body">
+        {% if location_name %}<span class="chip">{{ location_name }}</span>{% endif %}
+        {% if caption %}<p class="caption">{{ caption }}</p>{% endif %}
+        {% if hashtags %}<p class="tags">{% for t in hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}
+    </div>
     <footer class="post-foot"><span>by <a href="/u/{{ username }}">{{ username }}</a></span><span>{{ created_at_display }}</span></footer>
 </article>
 {% endblock %}
