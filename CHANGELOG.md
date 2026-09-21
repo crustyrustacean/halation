@@ -2,6 +2,17 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.8.1] - 2026-09-21
+
+### Fixed — environment loading + secret hygiene
+
+- **`.env` is now loaded**: dotenvy runs first in `main`, so local runs
+  pick up `.env` (dev convenience; production containers configure via
+  real env vars instead).
+- **`.env` untracked from git** (it had been committed with dev-only
+  credentials) and added to `.gitignore`; `.env.example` added as the
+  full variable map, including the commented Cloudflare R2 block.
+
 ## [0.8.0] - 2026-09-21
 
 ### Added — production container (DigitalOcean-ready)
