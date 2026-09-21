@@ -79,7 +79,7 @@ openssl rand -hex 48   # HALATION_SESSION_SIGNING_KEY
 
 ```bash
 cat > .env <<'EOF'
-DOMAIN=halation.ca
+DOMAIN=halation.photos
 POSTGRES_PASSWORD=<from openssl above>
 HALATION_SESSION_SIGNING_KEY=<from openssl above>
 APP_STORAGE__BACKEND=s3
