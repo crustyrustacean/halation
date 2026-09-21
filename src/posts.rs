@@ -15,12 +15,19 @@ pub const FEED_PAGE_SIZE: i64 = 10;
 /// A rendered post card. `media` holds media ids (templates build
 /// `/media/{id}/{variant}` URLs); `hashtags` is normalized lowercase.
 #[derive(Debug, Clone, Serialize)]
+pub struct CardMedia {
+    pub media_id: Uuid,
+    pub version: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct PostCard {
     pub id: Uuid,
     pub caption: Option<String>,
+    pub location_name: Option<String>,
     pub username: String,
     pub created_at_display: String,
-    pub media: Vec<Uuid>,
+    pub media: Vec<CardMedia>,
     pub hashtags: Vec<String>,
 }
 
@@ -123,7 +130,7 @@ async fn load_page(
     };
 
     let sql = format!(
-        "SELECT p.id, p.caption, u.username::text, p.created_at
+        "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
          FROM posts p
          JOIN users u ON u.id = p.user_id
          {tag_filter}
@@ -135,7 +142,8 @@ async fn load_page(
          LIMIT $3"
     );
 
-    let mut query = sqlx::query_as::<_, (Uuid, Option<String>, String, DateTime<Utc>)>(&sql)
+    let mut query =
+        sqlx::query_as::<_, (Uuid, Option<String>, Option<String>, String, DateTime<Utc>)>(&sql)
         .bind(cursor_created)
         .bind(cursor_id)
         .bind(limit + 1); // fetch one extra to detect has_more
@@ -160,8 +168,9 @@ async fn load_page(
         .map(|r| PostCard {
             id: r.0,
             caption: r.1.clone(),
-            username: r.2.clone(),
-            created_at_display: r.3.format("%b %d").to_string(),
+            location_name: r.2.clone(),
+            username: r.3.clone(),
+            created_at_display: r.4.format("%b %d").to_string(),
             media: media_map.get(&r.0).cloned().unwrap_or_default(),
             hashtags: tag_map.get(&r.0).cloned().unwrap_or_default(),
         })
@@ -173,12 +182,12 @@ async fn load_page(
 async fn load_media_ids(
     pool: &PgPool,
     post_ids: &[Uuid],
-) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, anyhow::Error> {
+) -> Result<std::collections::HashMap<Uuid, Vec<CardMedia>>, anyhow::Error> {
     if post_ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT pm.post_id, m.id
+    let rows: Vec<(Uuid, Uuid, i32)> = sqlx::query_as(
+        "SELECT pm.post_id, m.id, m.version
          FROM post_media pm
          JOIN media m ON m.id = pm.media_id
          WHERE pm.post_id = ANY($1)
@@ -189,9 +198,9 @@ async fn load_media_ids(
     .await
     .map_err(|e| anyhow!("Failed to load post media: {e}"))?;
 
-    let mut map: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
-    for (post_id, media_id) in rows {
-        map.entry(post_id).or_default().push(media_id);
+    let mut map: std::collections::HashMap<Uuid, Vec<CardMedia>> = std::collections::HashMap::new();
+    for (post_id, media_id, version) in rows {
+        map.entry(post_id).or_default().push(CardMedia { media_id, version });
     }
     Ok(map)
 }
@@ -265,19 +274,22 @@ async fn resolve_cursor(
 // reading — permalink & profile
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct PostMediaView {
     pub media_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exif: Option<serde_json::Value>,
+    pub version: i32,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PostPage {
     pub post_id: Uuid,
+    pub owner_id: Uuid,
     pub caption: Option<String>,
     pub username: String,
     pub created_at_display: String,
+    pub location_name: Option<String>,
     pub media: Vec<PostMediaView>,
     pub hashtags: Vec<String>,
 }
@@ -285,23 +297,24 @@ pub struct PostPage {
 /// Permalink data: the post, its owner, its media (with EXIF), its tags.
 /// Returns `None` for unknown or deleted posts.
 pub async fn load_post_page(pool: &PgPool, post_id: Uuid) -> Result<Option<PostPage>, anyhow::Error> {
-    let row: Option<(Uuid, Option<String>, String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT p.id, p.caption, u.username::text, p.created_at
-         FROM posts p JOIN users u ON u.id = p.user_id
-         WHERE p.id = $1",
-    )
-    .bind(post_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to load post: {e}"))?;
+    let row: Option<(Uuid, Uuid, Option<String>, String, DateTime<Utc>, Option<String>)> =
+        sqlx::query_as(
+            "SELECT p.id, p.user_id, p.caption, u.username::text, p.created_at, p.location_name
+             FROM posts p JOIN users u ON u.id = p.user_id
+             WHERE p.id = $1",
+        )
+        .bind(post_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| anyhow!("Failed to load post: {e}"))?;
 
-    let Some((id, caption, username, created_at)) = row else {
+    let Some((id, owner_id, caption, username, created_at, location_name)) = row else {
         return Ok(None);
     };
 
     // JSONB decoded via ::text + serde (consistent with the sessions table).
-    let media_rows: Vec<(Uuid, Option<String>)> = sqlx::query_as(
-        "SELECT pm.media_id, m.exif::text
+    let media_rows: Vec<(Uuid, Option<String>, i32)> = sqlx::query_as(
+        "SELECT pm.media_id, m.exif::text, m.version
          FROM post_media pm JOIN media m ON m.id = pm.media_id
          WHERE pm.post_id = $1 ORDER BY pm.position",
     )
@@ -312,9 +325,10 @@ pub async fn load_post_page(pool: &PgPool, post_id: Uuid) -> Result<Option<PostP
 
     let media: Vec<PostMediaView> = media_rows
         .into_iter()
-        .map(|(media_id, exif_json)| PostMediaView {
+        .map(|(media_id, exif_json, version)| PostMediaView {
             media_id,
             exif: exif_json.and_then(|s| serde_json::from_str(&s).ok()),
+            version,
         })
         .collect();
 
@@ -330,12 +344,44 @@ pub async fn load_post_page(pool: &PgPool, post_id: Uuid) -> Result<Option<PostP
 
     Ok(Some(PostPage {
         post_id: id,
+        owner_id,
         caption,
         username,
         created_at_display: created_at.format("%b %d").to_string(),
+        location_name,
         media,
         hashtags,
     }))
+}
+
+/// Media views for the post that owns `media_id` — used by the rotate
+/// fragment to re-render the block with bumped versions.
+pub async fn load_post_media_block_for_media(
+    pool: &PgPool,
+    media_id: Uuid,
+) -> Result<Option<Vec<PostMediaView>>, anyhow::Error> {
+    let post_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT post_id FROM post_media WHERE media_id = $1 LIMIT 1")
+            .bind(media_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| anyhow!("Failed to find post for media: {e}"))?;
+
+    let Some(post_id) = post_id else {
+        return Ok(None);
+    };
+
+    let media: Vec<PostMediaView> = sqlx::query_as(
+        "SELECT pm.media_id, m.exif::text, m.version
+         FROM post_media pm JOIN media m ON m.id = pm.media_id
+         WHERE pm.post_id = $1 ORDER BY pm.position",
+    )
+    .bind(post_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to load media block: {e}"))?;
+
+    Ok(Some(media))
 }
 
 /// The public view of an account: no email, no hash — only what a
@@ -355,6 +401,7 @@ pub struct ProfileView {
 pub struct ProfileThumb {
     pub post_id: Uuid,
     pub media_id: Uuid,
+    pub version: i32,
 }
 
 pub async fn load_profile(
@@ -382,13 +429,16 @@ pub async fn load_profile(
             .await
             .map_err(|e| anyhow!("Failed to count posts: {e}"))?;
 
-    // Rows are (post_id, Option<media_id>) — posts without media are
-    // filtered out rather than failing the whole grid.
-    let rows: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as(
-        "SELECT p.id,
-                (SELECT pm.media_id FROM post_media pm
-                 WHERE pm.post_id = p.id ORDER BY pm.position LIMIT 1)
+    // Rows are (post_id, Option<media_id>, Option<version>) — posts without
+    // media are filtered out rather than failing the whole grid.
+    let rows: Vec<(Uuid, Option<Uuid>, Option<i32>)> = sqlx::query_as(
+        "SELECT p.id, first_pm.media_id, first_pm.version
          FROM posts p
+         LEFT JOIN LATERAL (
+             SELECT pm.media_id, m.version
+             FROM post_media pm JOIN media m ON m.id = pm.media_id
+             WHERE pm.post_id = p.id ORDER BY pm.position LIMIT 1
+         ) first_pm ON true
          WHERE p.user_id = $1
          ORDER BY p.created_at DESC, p.id DESC",
     )
@@ -398,7 +448,9 @@ pub async fn load_profile(
     .map_err(|e| anyhow!("Failed to load profile posts: {e}"))?;
     let thumbs: Vec<ProfileThumb> = rows
         .into_iter()
-        .filter_map(|(post_id, media_id)| media_id.map(|media_id| ProfileThumb { post_id, media_id }))
+        .filter_map(|(post_id, media_id, version)| {
+            media_id.map(|media_id| ProfileThumb { post_id, media_id, version: version.unwrap_or(1) })
+        })
         .collect();
 
     let initial = username

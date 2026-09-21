@@ -112,8 +112,9 @@ fn convert_heic_to_jpeg(heic_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
 
 /// Decode any supported input (JPEG/PNG/WebP natively, HEIC via conversion)
 /// into a DynamicImage plus the mime type of the *original* bytes.
-fn decode(raw: &[u8]) -> Result<(DynamicImage, String), MediaError> {
-    // HEIC sniff: ISOBMFF `ftyp` box at offset 4
+pub(crate) fn decode_image(raw: &[u8]) -> Result<(DynamicImage, String), MediaError> {
+    // HEIC sniff: ISOBMFF `ftyp` box at offset 4. (HEIC orientation
+    // properties are not exposed by the decoder — JPEG is the dominant case.)
     if raw.len() > 12 && &raw[4..8] == b"ftyp" {
         let jpeg = convert_heic_to_jpeg(raw).map_err(|_| MediaError::InvalidImage)?;
         let img = image::load_from_memory(&jpeg).map_err(|_| MediaError::InvalidImage)?;
@@ -121,7 +122,15 @@ fn decode(raw: &[u8]) -> Result<(DynamicImage, String), MediaError> {
     }
 
     let format = image::guess_format(raw).map_err(|_| MediaError::InvalidImage)?;
-    let img = image::load_from_memory(raw).map_err(|_| MediaError::InvalidImage)?;
+    let mut img = image::load_from_memory(raw).map_err(|_| MediaError::InvalidImage)?;
+
+    // Portrait phone photos carry their rotation in the EXIF Orientation
+    // tag; the decoder does not apply it, and our derivatives are
+    // EXIF-stripped — so the pipeline must bake it in here, or every
+    // served image inherits the wrong orientation forever. (kamadak reads
+    // the tag for any EXIF-bearing container.)
+    img.apply_orientation(exif_orientation(raw));
+
     let mime = match format {
         image::ImageFormat::Jpeg => "image/jpeg",
         image::ImageFormat::Png => "image/png",
@@ -237,6 +246,32 @@ pub fn extract_exif(raw: &[u8]) -> Option<serde_json::Value> {
     }
 }
 
+/// The EXIF Orientation tag of the raw bytes, as an image orientation.
+/// Used by the rotate flow so manual rotation stacks on top of the
+/// orientation the camera recorded.
+pub fn exif_orientation(raw: &[u8]) -> image::metadata::Orientation {
+    let mut cursor = Cursor::new(raw);
+    exif::Reader::new()
+        .read_from_container(&mut cursor)
+        .ok()
+        .and_then(|exif| exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY).cloned())
+        .and_then(|field| match &field.value {
+            exif::Value::Short(values) => values.first().map(|v| *v as u8),
+            _ => None,
+        })
+        .and_then(image::metadata::Orientation::from_exif)
+        .unwrap_or(image::metadata::Orientation::NoTransforms)
+}
+
+/// Rotate 90 degrees clockwise, N quarter-turns.
+pub fn rotate_cw(img: &DynamicImage, quarter_turns: u32) -> DynamicImage {
+    let mut img = img.clone();
+    for _ in 0..(quarter_turns % 4) {
+        img = img.rotate90();
+    }
+    img
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()
@@ -294,29 +329,17 @@ fn derivative_image(img: &DynamicImage, variant: &str) -> DynamicImage {
 // The pipeline: sniff → decode (HEIC converts to JPEG) → EXIF → sha256 →
 /// derivatives (thumb/medium/large, all EXIF-free by construction) → save
 /// everything under `{media_id}/…` keys.
-pub async fn process_and_store(
+/// Generate and store the derivative set for an image under
+/// `{media_id}/{variant}.jpg`. Used by the upload pipeline and again by
+/// the rotate flow (same keys, new pixels, new dimensions).
+pub(crate) async fn store_derivatives(
     storage: &dyn StorageBackend,
-    raw: &[u8],
-) -> Result<StoredMedia, MediaError> {
-    let (img, mime_type) = decode(raw)?;
-    let exif = extract_exif(raw);
-
-    let media_id = Uuid::new_v4();
-    let (width, height) = (img.width(), img.height());
-    let sha256 = sha256_hex(raw);
-
-    let original_key = format!(
-        "{media_id}/original.{}",
-        extension_for(&mime_type)
-    );
-    storage
-        .save(&original_key, Bytes::copy_from_slice(raw))
-        .await
-        .map_err(|e| MediaError::Operation(anyhow!("Failed to store original: {e}")))?;
-
+    media_id: Uuid,
+    img: &DynamicImage,
+) -> Result<Vec<Derivative>, MediaError> {
     let mut derivatives = Vec::new();
     for variant in ["thumb", "medium", "large"] {
-        let derived = derivative_image(&img, variant);
+        let derived = derivative_image(img, variant);
         let encoded = encode_jpeg(&derived)?;
         let key = format!("{media_id}/{variant}.jpg");
         storage
@@ -335,6 +358,30 @@ pub async fn process_and_store(
             size_bytes: encoded.len() as i64,
         });
     }
+    Ok(derivatives)
+}
+
+pub async fn process_and_store(
+    storage: &dyn StorageBackend,
+    raw: &[u8],
+) -> Result<StoredMedia, MediaError> {
+    let (img, mime_type) = decode_image(raw)?;
+    let exif = extract_exif(raw);
+
+    let media_id = Uuid::new_v4();
+    let (width, height) = (img.width(), img.height());
+    let sha256 = sha256_hex(raw);
+
+    let original_key = format!(
+        "{media_id}/original.{}",
+        extension_for(&mime_type)
+    );
+    storage
+        .save(&original_key, Bytes::copy_from_slice(raw))
+        .await
+        .map_err(|e| MediaError::Operation(anyhow!("Failed to store original: {e}")))?;
+
+    let derivatives = store_derivatives(storage, media_id, &img).await?;
 
     Ok(StoredMedia {
         media_id,
@@ -511,6 +558,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exif_orientation_is_applied_by_the_pipeline() {
+        // Arrange — a landscape 1600x1000 JPEG whose EXIF says "rotate 90 CW"
+        // (orientation 6: the classic portrait phone photo)
+        let storage = InMemoryStorageBackend::new();
+        let raw = jpeg_with_exif_app1(
+            test_jpeg(1600, 1000),
+            exif_tiff(Some("Test"), Some(6)),
+        );
+
+        // Act
+        let stored = process_and_store(&storage, &raw).await.unwrap();
+
+        // Assert — dimensions are swapped: the stored image is portrait
+        assert_eq!((1000, 1600), (stored.width, stored.height));
+        let medium = stored.derivatives.iter().find(|d| d.variant == "medium").unwrap();
+        assert_eq!((400, 640), (medium.width, medium.height), "portrait medium");
+        // EXIF (including the orientation tag itself) survives in the DB copy
+        assert!(stored.exif.is_some());
+    }
+
+    #[tokio::test]
     async fn corrupt_input_yields_invalid_image() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
@@ -564,6 +632,63 @@ mod tests {
         jpeg
     }
 
+    /// TIFF payload with a Make entry and/or an Orientation entry.
+    fn exif_tiff(make: Option<&str>, orientation: Option<u16>) -> Vec<u8> {
+        let mut entries: Vec<(u16, u16, u32, Vec<u8>)> = Vec::new();
+        if let Some(make) = make {
+            let mut value = make.as_bytes().to_vec();
+            value.push(0);
+            entries.push((0x010F, 2, value.len() as u32, value)); // ASCII
+        }
+        if let Some(orientation) = orientation {
+            // SHORT fits inline, left-justified in the 4-byte value field
+            entries.push((
+                0x0112,
+                3,
+                1,
+                vec![orientation as u8, 0, 0, 0],
+            ));
+        }
+        entries.sort_by_key(|entry| entry.0); // TIFF requires ascending tags
+
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II");
+        tiff.extend_from_slice(&0x002A_u16.to_le_bytes());
+        tiff.extend_from_slice(&8_u32.to_le_bytes());
+        tiff.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        let mut data_block = Vec::new();
+        for (tag, kind, count, value) in &entries {
+            tiff.extend_from_slice(&tag.to_le_bytes());
+            tiff.extend_from_slice(&kind.to_le_bytes());
+            tiff.extend_from_slice(&count.to_le_bytes());
+            if value.len() <= 4 {
+                let mut inline = value.clone();
+                inline.resize(4, 0);
+                tiff.extend_from_slice(&inline);
+            } else {
+                let offset = 8 + 2 + 12 * entries.len() as u32 + 4 + data_block.len() as u32;
+                tiff.extend_from_slice(&offset.to_le_bytes());
+                data_block.extend_from_slice(value);
+            }
+        }
+        tiff.extend_from_slice(&0_u32.to_le_bytes());
+        tiff.extend_from_slice(&data_block);
+        tiff
+    }
+
+    /// Inject an EXIF APP1 segment into a real JPEG (after the SOI), so
+    /// the result both decodes as an image and carries EXIF.
+    fn jpeg_with_exif_app1(jpeg: Vec<u8>, tiff: Vec<u8>) -> Vec<u8> {
+        let mut app1_payload = b"Exif\0\0".to_vec();
+        app1_payload.extend_from_slice(&tiff);
+        let mut out = vec![0xFF, 0xD8];
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        out.extend_from_slice(&((app1_payload.len() + 2) as u16).to_be_bytes());
+        out.extend_from_slice(&app1_payload);
+        out.extend_from_slice(&jpeg[2..]); // original data after its SOI
+        out
+    }
+
     #[test]
     fn exif_extraction_reads_make_from_hand_built_segment() {
         // Act
@@ -574,10 +699,12 @@ mod tests {
         assert_eq!(exif["make"], "Test");
     }
 
+
     #[test]
     fn exif_absent_yields_none() {
         // Act / Assert
         assert!(extract_exif(&test_jpeg(50, 50)).is_none());
     }
 }
+
 

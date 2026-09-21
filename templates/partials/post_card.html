@@ -1,11 +1,12 @@
 <article class="post" data-post-id="{{ post.id }}">
     {% if post.media | length > 1 %}
     <div class="photo-set">
-        {% for m in post.media %}<a href="/p/{{ post.id }}"><img src="/media/{{ m }}/medium" alt="Photo"></a>{% endfor %}
+        {% for m in post.media %}<a href="/p/{{ post.id }}"><img src="/media/{{ m.media_id }}/medium?v={{ m.version }}" alt="Photo"></a>{% endfor %}
     </div>
     {% else %}
-    {% for m in post.media %}<a href="/p/{{ post.id }}"><img class="solo" src="/media/{{ m }}/medium" alt="Photo"></a>{% endfor %}
+    {% for m in post.media %}<a href="/p/{{ post.id }}"><img class="solo" src="/media/{{ m.media_id }}/medium?v={{ m.version }}" alt="Photo"></a>{% endfor %}
     {% endif %}
+    {% if post.location_name %}<span class="chip">{{ post.location_name }}</span>{% endif %}
     <div class="post-body">
         {% if post.caption %}<p class="caption">{{ post.caption }}</p>{% endif %}
         {% if post.hashtags %}<p class="tags">{% for t in post.hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}

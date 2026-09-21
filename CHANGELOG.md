@@ -2,6 +2,29 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.6.0] - 2026-09-20
+
+### Phase 3.5 — orientation fix, reverse geocoding, manual rotate
+
+- **EXIF orientation is now applied by the pipeline.** Portrait phone
+  photos carry a rotation in their EXIF Orientation tag; the image crate
+  does not apply it on decode, and our derivatives are EXIF-stripped —
+  so sideways photos were baked in forever. The pipeline now reads the
+  tag (kamadak) and bakes the rotation into every derivative.
+- **Reverse geocoding**: uploads with GPS EXIF get a location chip
+  ("Discovery Park"-style) via Nominatim (OpenStreetMap), best-effort
+  with a 3s timeout — offline or disabled simply means no chip.
+  Privacy note: this sends coordinates to OSM at upload time; disable
+  with `geocode.enabled: false` in config.
+- **Manual rotate**: owners get a per-photo rotate button on permalinks
+  (owner-only, 403 otherwise; 401 unauthenticated). Rotation re-derives
+  all variants from the stored original (EXIF orientation + cumulative
+  manual rotation), bumps the media version as a cache buster, and
+  patches the page in place via Datastar. Originals are never modified.
+- 65 tests green (32 lib incl. hand-built EXIF orientation fixture and
+  Nominatim parser; 33 API incl. rotate ownership/version/dimensions,
+  unauthenticated 401, location chip rendering).
+
 ## [0.5.0] - 2026-09-20
 
 ### Phase 3 — the app becomes browsable

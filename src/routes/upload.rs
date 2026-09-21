@@ -2,6 +2,7 @@
 
 // dependencies
 use crate::posts;
+use crate::services::geocode::Geocoder;
 use crate::services::media::{self, MediaError};
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
@@ -55,6 +56,7 @@ pub async fn post_upload(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     pool: web::Data<sqlx::PgPool>,
     storage: web::Data<Box<dyn crate::storage::StorageBackend>>,
+    geocoder: web::Data<Geocoder>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let identity = match identity {
@@ -143,6 +145,30 @@ pub async fn post_upload(
         .map_err(|e| crate::utils::e500(e))?;
     }
 
+    // GPS -> location name: best-effort reverse geocode of the first
+    // photo's coordinates (see services::geocode for the privacy note).
+    let mut location_name: Option<String> = None;
+    if geocoder.enabled() {
+        for file in form.files.iter() {
+            let raw = std::fs::read(file.file.path()).unwrap_or_default();
+            let exif = media::extract_exif(&raw);
+            let lat = exif.as_ref().and_then(|e| e.get("gps_latitude")).and_then(|v| v.as_f64());
+            let lng = exif.as_ref().and_then(|e| e.get("gps_longitude")).and_then(|v| v.as_f64());
+            if let (Some(lat), Some(lng)) = (lat, lng) {
+                location_name = geocoder.reverse(lat, lng).await;
+                break;
+            }
+        }
+    }
+    if let Some(name) = &location_name {
+        sqlx::query("UPDATE posts SET location_name = $2 WHERE id = $1")
+            .bind(post_id)
+            .bind(name)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| crate::utils::e500(e))?;
+    }
+
     tx.commit().await.map_err(|e| crate::utils::e500(e))?;
 
     Ok(HttpResponse::SeeOther()
@@ -159,6 +185,7 @@ pub async fn get_post_page(
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let post_id = path.into_inner();
+    let viewer_id = identity.as_ref().and_then(|i| i.id().ok()).and_then(|s| Uuid::parse_str(&s).ok());
 
     match crate::posts::load_post_page(pool.get_ref(), post_id)
         .await
@@ -170,6 +197,7 @@ pub async fn get_post_page(
             context["header"] = serde_json::json!("Halation");
             context["sub_header"] = serde_json::json!("A post.");
             context["logged_in"] = serde_json::json!(identity.is_some());
+            context["can_rotate"] = serde_json::json!(viewer_id == Some(page.owner_id));
 
             let body = templates.render("post.html", &context)?;
             Ok(HttpResponse::Ok().content_type("text/html").body(body))

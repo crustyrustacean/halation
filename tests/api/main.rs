@@ -7,5 +7,6 @@ mod health_check;
 mod feed;
 mod helpers;
 mod pages;
+mod rotate;
 mod session_store;
 mod upload;

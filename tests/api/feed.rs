@@ -155,6 +155,32 @@ async fn load_more_fragment_paginates_and_exhausts() {
 }
 
 #[tokio::test]
+async fn location_chip_renders_on_the_feed() {
+    // Arrange — upload, then set the location the geocoder would produce
+    let app = spawn_app().await;
+    let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
+    upload_photo(&app, &cookie, "chip test", 600, 400).await;
+    sqlx::query("UPDATE posts SET location_name = 'Discovery Park'")
+        .execute(&app.db_pool)
+        .await
+        .unwrap();
+
+    // Act
+    let response = app
+        .api_client
+        .get(&format!("{}/", &app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert
+    assert_eq!(200, response.status().as_u16());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("chip"), "location chip present");
+    assert!(body.contains("Discovery Park"), "location name rendered");
+}
+
+#[tokio::test]
 async fn hashtag_flow_from_caption_to_tag_page() {
     // Arrange
     let app = spawn_app().await;

@@ -9,7 +9,7 @@
     <p class="meta">{{ profile.post_count }} post{% if profile.post_count != 1 %}s{% endif %} · joined {{ profile.joined_display }}</p>
 </section>
 <div class="grid">
-    {% for t in profile.thumbs %}<a href="/p/{{ t.post_id }}"><img src="/media/{{ t.media_id }}/thumb" alt="Post"></a>{% endfor %}
+    {% for t in profile.thumbs %}<a href="/p/{{ t.post_id }}"><img src="/media/{{ t.media_id }}/thumb?v={{ t.version }}" alt="Post"></a>{% endfor %}
     {% if profile.thumbs | length == 0 %}<p class="empty">No posts yet.</p>{% endif %}
 </div>
 {% endblock %}

@@ -5,7 +5,8 @@ use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::guards::require_datastar_request_header;
 use actix_web::middleware::from_fn;
-use crate::routes::{api, auth, feed, health_check, media_serving, pages, profile, upload};
+use crate::routes::{api, auth, feed, health_check, media_rotate, media_serving, pages, profile, upload};
+use crate::services::geocode::Geocoder;
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
 use crate::services::RateLimiter;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
@@ -131,6 +132,10 @@ async fn run(
 
     let rate_limiter =
         web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
+    let geocoder = web::Data::new(Geocoder::new(
+        configuration.geocode.enabled,
+        configuration.geocode.base_url.clone(),
+    ));
 
     // SessionMiddleware contains Rc internals and must be constructed per
     // worker inside the closure; the pool-backed store and the signing key
@@ -184,6 +189,7 @@ async fn run(
             .route("/upload", web::get().to(upload::get_upload_page))
             .route("/upload", web::post().to(upload::post_upload))
             .route("/p/{post_id}", web::get().to(upload::get_post_page))
+            .route("/fragments/media/{media_id}/rotate", web::post().to(media_rotate::rotate_media))
             .route("/media/{media_id}/{variant}", web::get().to(media_serving::get_media_derivative))
             // Datastar fragment endpoints live under this scope; every
             // mutation must carry the Datastar-Request header or 403.
@@ -198,6 +204,7 @@ async fn run(
             .app_data(template_renderer.clone())
             .app_data(storage_backend.clone())
             .app_data(rate_limiter.clone())
+            .app_data(geocoder.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()
                     .total_limit(UPLOAD_LIMIT_BYTES),

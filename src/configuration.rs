@@ -12,6 +12,7 @@ pub struct Settings {
     pub database: DatabaseSettings,
     pub storage: StorageSettings,
     pub email: EmailSettings,
+    pub geocode: GeocodeSettings,
     pub secrets: SecretsSettings,
 }
 
@@ -60,6 +61,25 @@ fn default_storage_backend() -> String {
 
 fn default_email_backend() -> String {
     "noop".to_string()
+}
+
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct GeocodeSettings {
+    /// Reverse geocoding (GPS -> location names) via Nominatim. Enabled by
+    /// default: the upload path sends GPS coordinates to the configured
+    /// service, best-effort, and degrades to no location when unavailable.
+    #[serde(default = "default_geocode_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_geocode_base_url")]
+    pub base_url: String,
+}
+
+fn default_geocode_enabled() -> bool {
+    true
+}
+
+fn default_geocode_base_url() -> String {
+    "https://nominatim.openstreetmap.org".to_string()
 }
 
 /// Secret material. The dev default lives in base.yaml; production MUST

@@ -21,3 +21,6 @@ email:
 secrets:
   # Dev-only signing key. Production MUST override via APP_SECRETS__SESSION_SIGNING_KEY.
   session_signing_key: "dev-only-key-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+geocode:
+  enabled: true
+  base_url: "https://nominatim.openstreetmap.org"

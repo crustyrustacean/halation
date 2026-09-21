@@ -37,6 +37,8 @@ pub async fn spawn_app() -> TestApp {
         let mut c = get_configuration().expect("Failed to read configuration.");
 
         c.database.database_name = Uuid::new_v4().to_string();
+        // Keep tests hermetic: no reverse-geocode network calls.
+        c.geocode.enabled = false;
 
         c.application.port = 0;
 
@@ -65,6 +67,46 @@ pub async fn spawn_app() -> TestApp {
     };
 
     test_app
+}
+
+/// Upload one photo as the cookie's user; returns the permalink path.
+pub async fn upload_and_get_location(
+    app: &TestApp,
+    cookie: &str,
+    caption: &str,
+    width: u32,
+    height: u32,
+) -> String {
+    let img = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+    }));
+    let mut bytes = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+        .unwrap();
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name("photo.jpg")
+        .mime_str("image/jpeg")
+        .unwrap();
+
+    let response = app
+        .api_client
+        .post(&format!("{}/upload", &app.address))
+        .header("Cookie", cookie)
+        .multipart(
+            reqwest::multipart::Form::new()
+                .text("caption", caption.to_string())
+                .part("files", part),
+        )
+        .send()
+        .await
+        .expect("upload should succeed");
+    assert_eq!(303, response.status().as_u16());
+    response
+        .headers()
+        .get("Location")
+        .and_then(|v| v.to_str().ok())
+        .expect("upload should redirect")
+        .to_string()
 }
 
 /// Register a fresh user and return their session cookie string.
