@@ -20,12 +20,7 @@ scripts/init_dev_db.sh is NOT needed in production — the app creates
 and migrates its database on boot.
 ```
 
-See the deployment runbook (repo wiki / planning doc) for the full
-step-by-step: droplet creation, deploy key, `.env`, image transfer
-(`docker save | docker load`), Cloudflare DNS, and backups. Configuration
-is environment-driven (`APP_` prefix, `__` separator) — see
-`configuration/production.yaml`, `.env.example`, and
-`docker-compose.yml`.
+Full runbook: `docs/DEPLOYMENT.md`.
 
 ## Development
 
