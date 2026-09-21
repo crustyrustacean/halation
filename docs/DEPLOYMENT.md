@@ -26,8 +26,30 @@ Internet ──> :443 Caddy ──> app:8000 ──> db:5432 (compose network)
 3. **Image**: OS → **Ubuntu 24.04 (LTS) x64**
 4. **Size**: Shared CPU → Basic → **Regular**
    - $6/mo (1 GB) works; **$12/mo (2 GB)** recommended for headroom
-5. **Authentication**: SSH Key → **New SSH Key** → paste your public
-   key (`cat ~/.ssh/id_ed25519.pub`)
+5. **Authentication**: SSH Key → **New SSH Key** → paste your public key (see below)
+
+   > **What is this key?** It is the *personal* key from the machine you
+   > SSH from — it lets **you** reach the droplet. A second, separate key
+   > (a GitHub **deploy key**) is created on the droplet in Part 4 so the
+   > droplet can reach GitHub. Two keys, two directions.
+
+   On your own machine, check whether you already have a key:
+
+   ```bash
+   ls ~/.ssh/id_ed25519.pub 2>/dev/null || ls ~/.ssh/id_rsa.pub 2>/dev/null
+   ```
+
+   - If one exists: use it — `cat` it and copy the line.
+   - If not, create one (on **your machine**, not the droplet):
+
+     ```bash
+     ssh-keygen -t ed25519
+     # accept the default path; a passphrase is recommended here
+     cat ~/.ssh/id_ed25519.pub
+     ```
+
+   A public key is one long line starting with `ssh-ed25519` (or
+   `ssh-rsa`) — copy **the entire line**.
 6. Optional but recommended: tick **Backups** (weekly, +20%)
 7. Hostname: `halation-prod-1` → **Create Droplet**
 8. Copy the **IPv4 address** from the droplet page
@@ -50,19 +72,67 @@ curl -fsSL https://get.docker.com | sh
 
 ## 4. Get the code (deploy key)
 
+The repo is private, so the droplet needs GitHub to trust it. The
+standard mechanism is a **deploy key**: an SSH keypair that lives on
+the droplet, is registered with this one repository, and (by default)
+is read-only.
+
+### 4a. Generate the keypair — run this **on the droplet**
+
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/halation_deploy -N ""
+```
+
+- `-t ed25519` — the key algorithm (modern, short, strong)
+- `-f ~/.ssh/halation_deploy` — where the **private** half is written
+- `-N ""` — no passphrase (acceptable for a read-only, repo-scoped key
+  on a server you control; a passphrase would require ssh-agent setup)
+
+Two files appear:
+
+- `~/.ssh/halation_deploy` — the **private** half. It never leaves the
+  droplet and is never pasted anywhere.
+- `~/.ssh/halation_deploy.pub` — the **public** half. This is the one
+  you give to GitHub.
+
+### 4b. Show the public key
+
+```bash
 cat ~/.ssh/halation_deploy.pub
 ```
 
-GitHub → the `halation` repo → **Settings → Deploy keys** → **Add
-deploy key** → paste the public key (leave read-only). Then:
+One single line, starting with `ssh-ed25519` and ending with a comment.
+Copy **the whole line** — everything on it, no trailing newline.
+
+### 4c. Register it with GitHub
+
+1. Browser → the `halation` repo on GitHub → **Settings** →
+   **Deploy keys** (left sidebar, near the bottom) → **Add deploy key**
+2. **Title**: `halation-prod-1` (or anything recognizable)
+3. **Key**: paste the full line from 4b
+4. Leave **"Allow write access"** UNCHECKED — read-only is least
+   privilege, and this server only ever pulls
+5. **Add key**
+
+### 4d. Teach git on the droplet to use this key
+
+Without this step, `git clone` tries your droplet's default keys and
+fails with `Permission denied (publickey)`:
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
 Host github.com
   IdentityFile ~/.ssh/halation_deploy
 EOF
+```
+
+### 4e. Verify, then clone
+
+```bash
+ssh -T git@github.com
+# expected success message:
+# "Hi crustyrustacean/halation! You've successfully authenticated,
+#  but GitHub does not provide shell access."
 
 git clone -b trunk git@github.com:crustyrustacean/halation.git /opt/halation
 cd /opt/halation
