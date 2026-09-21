@@ -1,0 +1,9 @@
+target
+.git
+tests
+scripts
+.env
+*.db
+docker-compose.yml
+CHANGELOG.md
+README.md

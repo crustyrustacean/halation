@@ -2,6 +2,26 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.8.0] - 2026-09-21
+
+### Added — production container (DigitalOcean-ready)
+
+- **Multi-stage `Dockerfile`** (cargo-chef pattern, ported from
+  metallian-photos): dependency-cached release builds, `libheif-dev` in
+  the builder, slim runtime with `libheif1` + ca-certificates + curl,
+  non-root `appuser`, `HEALTHCHECK` on `/health_check`
+- **`docker-compose.yml`**: local production-like stack (app + postgres:17
+  with persistent volume); the app self-creates + self-migrates its
+  database on boot
+- **`.dockerignore`**: lean build context (no target/, .git, tests, .env)
+- Verified: image builds, runs as `appuser`, healthcheck healthy,
+  register-through-container persists to Postgres
+- Deployment targets: DO App Platform (builds from the Dockerfile) or a
+  droplet with docker compose; managed Postgres note: create the
+  `halation` database in the control panel (or grant CREATEDB — the app
+  self-creates when the user has rights); `APP_DATABASE__REQUIRE_SSL`
+  defaults true in production and DO managed Postgres supports it
+
 ## [0.7.0] - 2026-09-20
 
 ### Added — beauty pass: the design contract lands
