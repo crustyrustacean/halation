@@ -1,0 +1,5 @@
+# Automatic HTTPS: Caddy obtains and renews a Let's Encrypt certificate
+# for $DOMAIN as soon as the domain resolves to this server.
+{$DOMAIN} {
+	reverse_proxy app:8000
+}

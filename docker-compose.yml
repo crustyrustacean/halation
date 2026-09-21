@@ -1,28 +1,34 @@
-# Local production-like stack: Halation + Postgres.
-# Usage: docker compose up --build
+# Halation deployment stack: app + postgres + Caddy (automatic HTTPS).
 #
-# For real deployments, set HALATION_SESSION_SIGNING_KEY in your
-# environment (64+ random bytes) and swap storage backend to R2 via:
-#   APP_STORAGE__BACKEND=s3
-#   APP_STORAGE__R2__BUCKET / __ENDPOINT / __ACCESS_KEY / __SECRET_KEY
+# First deploy on a fresh droplet (see README "Deployment"):
+#   1. fill in .env (copy .env.example)
+#   2. build locally and transfer the image:
+#        docker build -t halation:latest .
+#        docker save halation:latest | gzip | ssh root@<droplet> 'gunzip | docker load'
+#   3. docker compose up -d
+#
+# The app creates and migrates its own database on boot.
+
 services:
   db:
     image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
     volumes:
       - halation_pg_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
       timeout: 3s
       retries: 10
+    # Postgres is reachable only inside the compose network — no host port.
 
   app:
+    image: halation:latest
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -33,15 +39,39 @@ services:
       APP_DATABASE__HOST: db
       APP_DATABASE__PORT: "5432"
       APP_DATABASE__USERNAME: postgres
-      APP_DATABASE__PASSWORD: password
+      APP_DATABASE__PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       APP_DATABASE__DATABASE_NAME: halation
-      # Internal compose network has no TLS termination on Postgres
+      # TLS to Postgres is unnecessary inside the compose network; flip to
+      # true when pointing at DO Managed Postgres (which supports it).
       APP_DATABASE__REQUIRE_SSL: "false"
-      APP_SECRETS__SESSION_SIGNING_KEY: ${HALATION_SESSION_SIGNING_KEY:-dev-only-compose-key-0123456789abcdef0123456789abcdef0123456789abcdef}
-      APP_STORAGE__BACKEND: memory
-      APP_GEOCODE__ENABLED: "true"
+      APP_SECRETS__SESSION_SIGNING_KEY: ${HALATION_SESSION_SIGNING_KEY:?set in .env}
+      APP_STORAGE__BACKEND: ${APP_STORAGE__BACKEND:-s3}
+      APP_STORAGE__R2__BUCKET: ${APP_STORAGE__R2__BUCKET:-}
+      APP_STORAGE__R2__FS_ROOT: ${APP_STORAGE__R2__FS_ROOT:-}
+      APP_STORAGE__R2__ENDPOINT: ${APP_STORAGE__R2__ENDPOINT:-}
+      APP_STORAGE__R2__ACCESS_KEY: ${APP_STORAGE__R2__ACCESS_KEY:-}
+      APP_STORAGE__R2__SECRET_KEY: ${APP_STORAGE__R2__SECRET_KEY:-}
+      APP_GEOCODE__ENABLED: ${APP_GEOCODE__ENABLED:-true}
+    # Loopback only — public traffic arrives through Caddy.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   halation_pg_data:
+  caddy_data:
+  caddy_config:

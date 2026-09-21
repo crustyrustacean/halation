@@ -2,6 +2,24 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.10.0] - 2026-09-21
+
+### Added — deployment stack (droplet-ready)
+
+- `docker-compose.yml` is now the deployment unit: app + postgres +
+  **Caddy** (automatic HTTPS for `$DOMAIN`). Postgres is reachable only
+  inside the compose network; the app publishes to loopback; Caddy owns
+  ports 80/443 on the host.
+- `Caddyfile`: `{$DOMAIN}` → reverse_proxy app:8000; certificates are
+  obtained and renewed automatically once DNS points at the server.
+- Required compose variables fail fast with instructions when missing
+  (DOMAIN, POSTGRES_PASSWORD, HALATION_SESSION_SIGNING_KEY) — set them
+  in `.env` next to the R2 values, and `docker compose up -d`.
+- `.env.example` gains the compose section; README deployment section
+  reworked. Full runbook lives in the planning doc.
+
+Bump to 0.10.0.
+
 ## [0.9.0] - 2026-09-21
 
 ### Fixed — R2 configuration never reached OpenDAL
