@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="auth">
+<section class="card">
+    <h1 class="card-title">Create your account.</h1>
     {% if errors | length > 0 %}
     <ul class="errors">
         {% for error in errors %}<li>{{ error }}</li>{% endfor %}
@@ -22,6 +23,6 @@
         <button type="submit">Create account</button>
     </form>
 
-    <p>Already have an account? <a href="/login">Log in</a></p>
+    <p class="auth-alt">Already have an account? <a href="/login">Log in</a></p>
 </section>
 {% endblock %}

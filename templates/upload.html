@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="auth">
+<section class="card">
+    <h1 class="card-title">New photo post.</h1>
     {% if errors | default(value=[]) | length > 0 %}
     <ul class="errors">
         {% for error in errors %}<li>{{ error }}</li>{% endfor %}

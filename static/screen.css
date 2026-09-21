@@ -1,38 +1,233 @@
-/* Halation — placeholder styles; the real design lands with the templates. */
-:root { color-scheme: light dark; }
-body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 40rem; padding: 1rem; }
-header h1 { letter-spacing: -0.02em; }
-nav a { margin-right: 1rem; }
+/* ============================================================
+   Halation — design system
+   Ported from the design contract: mockup/index.html
+   (Tumblr-dashboard navy, white cards, gold accents, 572px column)
+   ============================================================ */
 
-/* auth forms */
-form.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 22rem; }
-form.stack label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
-form.stack input { padding: 0.5rem; border: 1px solid #999; border-radius: 4px; }
-ul.errors { color: #b00020; list-style: none; padding: 0; }
-p.notice { color: #1a7f37; }
+:root {
+    --bg: #001935;
+    --bg-translucent: rgba(0, 25, 53, .88);
+    --card: #ffffff;
+    --accent: #00b8ff;
+    --gold: #ffb02e;
+    --text: #1a1a1a;
+    --text-soft: #333333;
+    --muted: #8a939c;
+    --muted-dark: #5a7290;
+    --tag: #9aa7b1;
+    --nav-text: #c7d6e2;
+    --line: #eef1f4;
+    --danger: #b00020;
+    --radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+::selection { background: var(--gold); color: var(--bg); }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+a { text-decoration: none; color: inherit; }
+img { display: block; }
+button { font: inherit; cursor: pointer; }
+
+/* ------------------------------------------------------------
+   chrome: topbar + footer
+   ------------------------------------------------------------ */
+
+.topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg-translucent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.topbar-inner {
+    max-width: 604px; margin: 0 auto; padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+}
+.brand { font-weight: 800; font-size: 16px; color: #fff; letter-spacing: .2px; }
+.brand .dot { color: var(--gold); }
+.topbar nav { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.topbar nav a { color: var(--nav-text); font-size: 13px; font-weight: 600; }
+.topbar nav a:hover { color: #fff; }
 .inline-form { display: inline; }
-.link-button { background: none; border: none; color: #0645ad; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
+.link-button {
+    background: none; border: none; padding: 0;
+    color: var(--nav-text); font-size: 13px; font-weight: 600;
+    cursor: pointer;
+}
+.link-button:hover { color: #fff; }
 
-/* posts */
-img.solo { max-width: 100%; border-radius: 8px; }
+main { max-width: 604px; margin: 0 auto; padding: 24px 16px 0; min-height: 70vh; }
+
+.site-foot {
+    text-align: center; color: var(--muted-dark);
+    font-size: 12.5px; padding: 24px 16px 40px;
+}
+
+/* ------------------------------------------------------------
+   headings + empty states
+   ------------------------------------------------------------ */
+
+.feed-title {
+    color: #cfe3f3; font-size: 15px; font-weight: 700;
+    letter-spacing: .3px; margin-bottom: 16px;
+}
+p.empty { color: var(--muted); padding: 2rem 0; text-align: center; }
+
+/* ------------------------------------------------------------
+   post cards
+   ------------------------------------------------------------ */
+
+article.post {
+    background: var(--card);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+article.post img { width: 100%; }
 .photo-set { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
-.photo-set img { width: 100%; height: auto; display: block; }
-.caption { font-size: 15px; line-height: 1.55; }
-.meta { color: #777; font-size: 13px; }
+.photo-set img { height: 100%; object-fit: cover; }
 
-/* feed + cards */
-.feed-title { color: #cfe3f3; margin-bottom: 1rem; }
-p.empty { color: #8a9aa8; padding: 2rem 0; }
-article.post { background: #fff; color: #1a1a1a; border-radius: 8px; overflow: hidden; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
-article.post img { display: block; width: 100%; }
-.post-body { padding: 0.75rem 1rem; }
-.post-foot { padding: 0.5rem 1rem; border-top: 1px solid #eee; font-size: 13px; }
-.post-foot a, .tags a { color: #0645ad; }
-button.load-more { display: block; margin: 0 auto 2rem; padding: 0.5rem 1.5rem; border-radius: 999px; border: 1px solid rgba(255,255,255,.35); background: transparent; color: #cfe3f3; cursor: pointer; }
+.post-body { padding: 14px 18px 4px; }
+.caption { font-size: 15px; line-height: 1.55; color: var(--text-soft); }
 
-/* profile + grid */
-.profile { text-align: center; padding: 1rem 0; }
-.profile .avatar { width: 72px; height: 72px; border-radius: 50%; background: #ffb02e; color: #001935; font-size: 2rem; font-weight: 800; line-height: 72px; margin: 0 auto 0.5rem; }
-.profile .handle, .profile .meta { color: #8a9aa8; }
+.tags { margin-top: 10px; font-size: 13px; line-height: 1.9; }
+.tags .tag { color: var(--tag); margin-right: 8px; }
+.tags .tag:hover { color: var(--accent); }
+
+.post-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12.5px;
+}
+.post-foot a { color: var(--muted); font-weight: 600; }
+.post-foot a:hover { color: var(--accent); }
+
+/* EXIF meta row */
+.meta {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12.5px;
+}
+.meta span { display: inline-flex; align-items: center; white-space: nowrap; }
+
+/* location chip */
+.chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #eef4fa; color: #33566b;
+    font-size: 12px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px;
+    margin-bottom: 8px;
+}
+.chip::before {
+    content: ""; width: 6px; height: 6px;
+    background: var(--gold); border-radius: 50%;
+}
+
+/* rotate controls */
+.rotate-row { display: flex; gap: 8px; padding: 4px 18px 12px; }
+button.rotate {
+    background: none; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--muted); font-size: 12px; padding: 3px 10px;
+}
+button.rotate:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------
+   load more (sits on navy, below the card stack)
+   ------------------------------------------------------------ */
+
+button.load-more, .load-more {
+    display: block; margin: 4px auto 36px;
+    padding: 10px 26px; border-radius: 999px;
+    background: transparent; border: 1px solid rgba(255,255,255,.3);
+    color: #cfe3f3; font-size: 13.5px; font-weight: 700; cursor: pointer;
+}
+button.load-more:hover, .load-more:hover { background: rgba(255,255,255,.08); }
+
+/* ------------------------------------------------------------
+   cards for forms + profile + errors
+   ------------------------------------------------------------ */
+
+.card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+    color: var(--text);
+}
+
+form.stack { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+form.stack label {
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 13px; font-weight: 600; color: var(--text-soft);
+}
+form.stack input, form.stack textarea {
+    padding: 9px 10px; border: 1px solid #c9d2da; border-radius: 6px;
+    font: inherit; font-weight: 400; color: var(--text); background: #fff;
+}
+form.stack input:focus, form.stack textarea:focus {
+    outline: 2px solid var(--gold); border-color: var(--gold);
+}
+form.stack button[type="submit"] {
+    align-self: flex-start;
+    background: var(--gold); color: var(--bg);
+    font-weight: 700; font-size: 14px;
+    border: none; border-radius: 6px; padding: 9px 18px;
+}
+form.stack button[type="submit"]:hover { filter: brightness(1.05); }
+
+ul.errors { list-style: none; margin-bottom: 12px; }
+ul.errors li {
+    background: #fdeef0; color: var(--danger);
+    font-size: 13px; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px;
+}
+p.notice {
+    background: #eef8f0; color: #1a7f37;
+    font-size: 13px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px;
+}
+.auth-alt { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.auth-alt a { color: var(--accent); font-weight: 600; }
+
+/* ------------------------------------------------------------
+   profile
+   ------------------------------------------------------------ */
+
+section.profile {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 28px 24px 22px;
+    text-align: center;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+.profile .avatar {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold), #d98f13);
+    color: var(--bg); font-size: 2rem; font-weight: 800;
+    line-height: 72px; margin: 0 auto 10px;
+}
+.profile h1 { font-size: 22px; font-weight: 800; letter-spacing: -.2px; color: var(--text); }
+.profile .handle { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.profile .bio { font-size: 15px; line-height: 1.5; color: var(--text-soft); margin-top: 10px; }
+.profile .meta { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
-.grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.grid img {
+    width: 100%; aspect-ratio: 1; object-fit: cover;
+    border-radius: 3px;
+}
+.grid a:hover img { opacity: .85; }
+
+/* ------------------------------------------------------------
+   misc
+   ------------------------------------------------------------ */
+
+p.error-page { font-size: 15px; color: var(--text-soft); margin-bottom: 12px; }

@@ -8,25 +8,27 @@
     <title>Halation | {{ title }}</title>
 </head>
 <body>
-    <header>
-        <h1>{{ header }}</h1>
-        <h2>{{ sub_header }}</h2>
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">Hala<span class="dot">tion</span></a>
+            <nav>
+                <a href="/">Feed</a>
+                <a href="/recent">Recent</a>
+                {% if logged_in | default(value=false) %}
+                <a href="/upload">Upload</a>
+                <form method="post" action="/logout" class="inline-form"><button type="submit" class="link-button">Log out</button></form>
+                {% else %}
+                <a href="/login">Log in</a>
+                <a href="/register">Register</a>
+                {% endif %}
+            </nav>
+        </div>
     </header>
-    <nav>
-        <a href="/">Home</a>
-        {% if logged_in | default(value=false) %}
-        <a href="/upload">Upload</a>
-        <form method="post" action="/logout" class="inline-form"><button type="submit" class="link-button">Log out</button></form>
-        {% else %}
-        <a href="/login">Log in</a>
-        <a href="/register">Register</a>
-        {% endif %}
-    </nav>
     <main>
         {% block content %}{% endblock %}
     </main>
-    <footer>
-        <p>Halation — chronological, calm, ad-free.</p>
+    <footer class="site-foot">
+        Halation — chronological, calm, ad-free.
     </footer>
 </body>
 </html>

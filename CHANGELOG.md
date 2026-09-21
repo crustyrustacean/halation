@@ -2,6 +2,26 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.7.0] - 2026-09-20
+
+### Added — beauty pass: the design contract lands
+
+- **Full design system** in `screen.css`, ported from the mockup:
+  Tumblr-dashboard navy (#001935), white cards with 8px radius and soft
+  shadows, gold (#ffb02e) accents, blue links, 604px column
+- **Topbar chrome**: sticky translucent navy with blur, gold-accented
+  brand, nav (Feed / Recent / Upload / Log out)
+- **Post cards** styled like the mockup: white card, 2-up photo sets,
+  caption body, tag links, owner + date footer
+- **Profile page**: identity card (gradient avatar with initial, display
+  name, handle, bio, post count, joined date) over a 3-column thumb grid
+- **Forms**: card-wrapped stacked forms (login, register, upload) with
+  gold-focus inputs and gold submit buttons; error pills; success notices
+- **Location chips** styled (gold dot + navy-tint pill); **load-more**
+  pill on navy; styled 404/error cards; footer
+- Zero behavior changes — all 65 tests green untouched; the restyle is
+  verified by the same page-render tests added in v0.3.1
+
 ## [0.6.0] - 2026-09-20
 
 ### Phase 3.5 — orientation fix, reverse geocoding, manual rotate

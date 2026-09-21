@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="auth">
+<section class="card">
+    <h1 class="card-title">Welcome back.</h1>
     {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
 
     {% if errors | length > 0 %}
@@ -20,6 +21,6 @@
         <button type="submit">Log in</button>
     </form>
 
-    <p>New here? <a href="/register">Create an account</a></p>
+    <p class="auth-alt">New here? <a href="/register">Create an account</a></p>
 </section>
 {% endblock %}
