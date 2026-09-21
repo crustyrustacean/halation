@@ -2,6 +2,29 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.9.0] - 2026-09-21
+
+### Fixed — R2 configuration never reached OpenDAL
+
+`APP_STORAGE__R2__BUCKET` (and friends) never actually mapped into the
+config: the `__` separator produces the nested path `storage.r2.bucket`,
+while `StorageSettings` declared flat `r2_bucket` fields — so the bucket
+name stayed empty and OpenDAL failed at boot with "The bucket is
+misconfigured" (ConfigInvalid). Reproduced, then fixed.
+
+- `StorageSettings` now nests R2 credentials under `r2: R2Settings`,
+  matching the `__`-separator env convention exactly:
+  `APP_STORAGE__R2__BUCKET / __ENDPOINT / __ACCESS_KEY / __SECRET_KEY`
+  (so `.env` files written per the v0.8.1 docs work unchanged)
+- `configuration/base.yaml` storage section restructured to the nested
+  shape; `fs_root` moved into the R2 group (bucket path prefix)
+- serde mapping locked by unit tests: nested env shape → StorageSettings,
+  plus defaults when the r2 section is absent entirely
+- Deep health honestly reports storage unavailability against fake
+  credentials (verified); manual rotate + upload flows unchanged
+
+Bump to 0.9.0 — the storage config surface changed shape.
+
 ## [0.8.1] - 2026-09-21
 
 ### Fixed — environment loading + secret hygiene

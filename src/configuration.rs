@@ -10,9 +10,13 @@ use std::convert::{TryFrom, TryInto};
 pub struct Settings {
     pub application: ApplicationSettings,
     pub database: DatabaseSettings,
+    #[serde(default)]
     pub storage: StorageSettings,
+    #[serde(default)]
     pub email: EmailSettings,
+    #[serde(default)]
     pub geocode: GeocodeSettings,
+    #[serde(default)]
     pub secrets: SecretsSettings,
 }
 
@@ -40,14 +44,28 @@ pub struct StorageSettings {
     /// `memory` (default, tests/local) or `s3` (Cloudflare R2 via OpenDAL).
     #[serde(default = "default_storage_backend")]
     pub backend: String,
-    pub fs_root: String,
-    pub r2_bucket: String,
-    pub r2_endpoint: String,
-    pub r2_access_key: SecretString,
-    pub r2_secret_key: SecretString,
+    #[serde(default)]
+    pub r2: R2Settings,
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+/// R2 credentials as a nested group so the env spelling people expect —
+/// `APP_STORAGE__R2__BUCKET` — maps to `storage.r2.bucket` directly.
+#[derive(serde::Deserialize, Clone, Debug, Default)]
+pub struct R2Settings {
+    #[serde(default)]
+    pub bucket: String,
+    /// Optional path prefix inside the bucket.
+    #[serde(default)]
+    pub fs_root: String,
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub access_key: SecretString,
+    #[serde(default)]
+    pub secret_key: SecretString,
+}
+
+#[derive(serde::Deserialize, Clone, Debug, Default)]
 pub struct EmailSettings {
     /// `noop` (default) for v1; the Mailtrap/SMTP backend lands later
     /// behind the same `Mailer` trait.
@@ -59,11 +77,22 @@ fn default_storage_backend() -> String {
     "memory".to_string()
 }
 
+impl Default for StorageSettings {
+    /// Matches serde field defaults: the memory backend keeps local runs
+    /// and hermetic tests free of any S3 configuration.
+    fn default() -> Self {
+        Self {
+            backend: default_storage_backend(),
+            r2: R2Settings::default(),
+        }
+    }
+}
+
 fn default_email_backend() -> String {
     "noop".to_string()
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Deserialize, Clone, Debug, Default)]
 pub struct GeocodeSettings {
     /// Reverse geocoding (GPS -> location names) via Nominatim. Enabled by
     /// default: the upload path sends GPS coordinates to the configured
@@ -84,7 +113,7 @@ fn default_geocode_base_url() -> String {
 
 /// Secret material. The dev default lives in base.yaml; production MUST
 /// override via `APP_SECRETS__SESSION_SIGNING_KEY` (>= 64 random bytes).
-#[derive(serde::Deserialize, Clone)]
+#[derive(serde::Deserialize, Clone, Default)]
 pub struct SecretsSettings {
     pub session_signing_key: SecretString,
 }
@@ -103,6 +132,80 @@ impl DatabaseSettings {
             .port(self.port)
             .ssl_mode(ssl_mode)
             .database(&self.database_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The env source turns `APP_STORAGE__R2__BUCKET` into the nested path
+    /// `storage.r2.bucket` — StorageSettings must deserialize that shape,
+    /// or the S3 backend boots with an empty bucket ("The bucket is
+    /// misconfigured", OpenDAL ConfigInvalid).
+    #[test]
+    fn nested_r2_environment_maps_into_storage_settings() {
+        // Arrange — the same nested shape the config crate's env source
+        // produces for APP_STORAGE__R2__{BUCKET,ENDPOINT,ACCESS_KEY,SECRET_KEY}
+        let nested = serde_json::json!({
+            "application": {
+                "port": 8000,
+                "host": "127.0.0.1",
+                "base_url": "http://127.0.0.1:8000"
+            },
+            "database": {
+                "host": "127.0.0.1",
+                "port": 5433,
+                "username": "postgres",
+                "password": "password",
+                "database_name": "halation",
+                "require_ssl": false
+            },
+            "storage": {
+                "backend": "s3",
+                "r2": {
+                    "bucket": "halation-media",
+                    "endpoint": "https://abc123.r2.cloudflarestorage.com",
+                    "access_key": "access",
+                    "secret_key": "secret"
+                }
+            },
+            "email": { "backend": "noop" },
+            "secrets": { "session_signing_key": "test-key" }
+        });
+
+        // Act
+        let settings: Settings = serde_json::from_value(nested).expect("should deserialize");
+
+        // Assert
+        assert_eq!("s3", settings.storage.backend);
+        assert_eq!("halation-media", settings.storage.r2.bucket);
+        assert_eq!("https://abc123.r2.cloudflarestorage.com", settings.storage.r2.endpoint);
+        assert_eq!("access", settings.storage.r2.access_key.expose_secret());
+        assert_eq!("secret", settings.storage.r2.secret_key.expose_secret());
+    }
+
+    /// Defaults hold when the nested r2 section is absent entirely.
+    #[test]
+    fn storage_defaults_without_r2_section() {
+        // Arrange
+        let minimal = serde_json::json!({
+            "application": {
+                "port": 8000, "host": "127.0.0.1", "base_url": "http://127.0.0.1:8000"
+            },
+            "database": {
+                "host": "127.0.0.1", "port": 5433, "username": "postgres",
+                "password": "password", "database_name": "halation", "require_ssl": false
+            }
+        });
+
+        // Act
+        let settings: Settings = serde_json::from_value(minimal).expect("should deserialize");
+
+        // Assert — memory backend, empty r2 credentials
+        assert_eq!("memory", settings.storage.backend);
+        assert_eq!("", settings.storage.r2.bucket);
+        assert_eq!("", settings.storage.r2.access_key.expose_secret());
     }
 }
 

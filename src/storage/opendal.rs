@@ -17,12 +17,12 @@ pub struct OpendalStorageBackend {
 impl OpendalStorageBackend {
     pub fn new(config: &StorageSettings) -> Result<Self> {
         let builder = S3::default()
-            .root(&config.fs_root)
-            .bucket(&config.r2_bucket)
+            .root(&config.r2.fs_root)
+            .bucket(&config.r2.bucket)
             .region("auto")
-            .endpoint(&config.r2_endpoint)
-            .access_key_id(config.r2_access_key.expose_secret())
-            .secret_access_key(config.r2_secret_key.expose_secret());
+            .endpoint(&config.r2.endpoint)
+            .access_key_id(config.r2.access_key.expose_secret())
+            .secret_access_key(config.r2.secret_key.expose_secret());
 
         let op: Operator = Operator::new(builder)?;
 
