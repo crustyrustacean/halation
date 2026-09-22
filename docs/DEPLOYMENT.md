@@ -255,9 +255,13 @@ The app creates and migrates its database automatically on first boot.
 
 DigitalOcean → **Networking → Firewalls → Create Firewall**:
 
-- Inbound: TCP 22 (SSH — optionally restricted to your IP), TCP 80,
-  TCP 443
+- Inbound rule 1: **SSH** — TCP 22 (DO's quick-add SSH template opens
+  ONLY port 22 — that alone blocks the whole site)
+- Inbound rule 2: **HTTP** — TCP 80
+- Inbound rule 3: **HTTPS** — TCP 443
 - Apply to `halation-prod-1`
+
+Verify from outside the droplet: `curl -sI https://<domain>` → 200.
 
 This sits at the hypervisor, so it can't be bypassed by published
 Docker ports.
