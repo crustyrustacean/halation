@@ -70,6 +70,38 @@ ssh root@<droplet-ip>
 curl -fsSL https://get.docker.com | sh
 ```
 
+### 3.5 Create an admin user (recommended)
+
+A one-time five minutes: it removes `root` — the most-targeted account
+name on the internet — from direct SSH exposure and adds an
+accident-proofing layer. (Honest calibration: with key-only auth and a
+single admin this is defense-in-depth, not a wall — `docker` group
+membership is root-equivalent.)
+
+```bash
+adduser --gecos "" jeff                     # sets the sudo password
+usermod -aG sudo,docker jeff
+mkdir -p /home/jeff/.ssh
+cp /root/.ssh/authorized_keys /home/jeff/.ssh/authorized_keys
+chown -R jeff:jeff /home/jeff
+chmod 700 /home/jeff/.ssh
+chmod 600 /home/jeff/.ssh/authorized_keys
+chown -R jeff:jeff /opt/halation
+```
+
+From your laptop, verify **before** hardening anything:
+
+```bash
+ssh jeff@<droplet-ip>          # same public key, key auth just works
+sudo docker compose ls         # entered from /opt/halation
+```
+
+Optional, once verified: disable direct root SSH
+(`echo "PermitRootLogin no" | sudo tee /etc/ssh/sshd_config.d/99-hardening.conf`
+then `sudo systemctl restart ssh`). Keep a DO web console open as
+break-glass while you do it. From here on, connect as
+`ssh jeff@<droplet-ip>`.
+
 ## 4. Get the code (deploy key)
 
 The repo is private, so the droplet needs GitHub to trust it. The
@@ -168,7 +200,7 @@ From the dev machine (`~/dev/crustyrustacean/halation`):
 
 ```bash
 docker build -t halation:latest .
-docker save halation:latest | gzip | ssh root@<droplet-ip> 'gunzip | docker load'
+docker save halation:latest | gzip | ssh jeff@<droplet-ip> 'gunzip | docker load'
 ```
 
 The droplet never compiles — the image arrives ready to run.
