@@ -208,16 +208,29 @@ EOF
 chmod 600 .env
 ```
 
-## 6. Transfer the app image (built on your dev machine)
+## 6. Transfer the app image (built for the droplet's architecture)
 
 From the dev machine (`~/dev/crustyrustacean/halation`):
 
 ```bash
-docker build -t halation:latest .
+docker build --platform linux/amd64 -t halation:latest .
 docker save halation:latest | gzip | ssh jeff@<droplet-ip> 'gunzip | docker load'
 ```
 
 The droplet never compiles — the image arrives ready to run.
+
+> **Apple Silicon / ARM gotcha:** Docker Desktop on an Apple Silicon Mac
+> builds `linux/arm64` images by default. Loading an arm64 image onto an
+> x86-64 droplet boots fine and then dies at start with
+> `exec format error` in a restart loop. The `--platform linux/amd64`
+> flag above is what prevents it. Verify after transfer:
+> `docker image inspect halation:latest --format '{{.Os}}/{{.Architecture}}'`
+> → `linux/amd64`.
+>
+> The cross-compile runs under emulation, so it is slower than a native
+> build — let it run. If it is truly painful, the alternatives are a
+> temporarily larger droplet to build on, or a CI job that builds and
+> pushes the image for you.
 
 ## 7. Launch
 
