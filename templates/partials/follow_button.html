@@ -1,0 +1,1 @@
+<button id="follow-btn" class="follow-btn{% if is_following %} is-following{% endif %}" data-on-click="{% if is_following %}@delete('/fragments/users/{{ username }}/unfollow'){% else %}@post('/fragments/users/{{ username }}/follow'){% endif %}">{% if is_following %}Following{% else %}Follow{% endif %}</button>

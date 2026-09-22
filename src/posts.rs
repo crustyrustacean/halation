@@ -394,6 +394,12 @@ pub struct ProfileView {
     pub bio: Option<String>,
     pub joined_display: String,
     pub post_count: i64,
+    pub follower_count: i64,
+    pub following_count: i64,
+    /// Viewer-relative: true only when a logged-in viewer follows this account.
+    pub is_following: bool,
+    /// Viewer-relative: whether the follow/unfollow button should render.
+    pub can_follow: bool,
     pub thumbs: Vec<ProfileThumb>,
 }
 
@@ -407,6 +413,7 @@ pub struct ProfileThumb {
 pub async fn load_profile(
     pool: &PgPool,
     username: &str,
+    viewer: Option<Uuid>,
 ) -> Result<Option<ProfileView>, anyhow::Error> {
     let row: Option<(Uuid, String, Option<String>, Option<String>, DateTime<Utc>)> =
         sqlx::query_as(
@@ -458,6 +465,22 @@ pub async fn load_profile(
         .next()
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_else(|| "?".into());
+    let follower_count = crate::follows::count_followers(pool, user_id)
+        .await
+        .map_err(|e| anyhow!("Failed to count followers: {e}"))?;
+    let following_count = crate::follows::count_following(pool, user_id)
+        .await
+        .map_err(|e| anyhow!("Failed to count following: {e}"))?;
+    let is_following = match viewer {
+        Some(viewer) if viewer != user_id => {
+            crate::follows::is_following(pool, viewer, user_id)
+                .await
+                .map_err(|e| anyhow!("Failed to check follow state: {e}"))?
+        }
+        _ => false,
+    };
+    let can_follow = viewer.is_some() && viewer != Some(user_id);
+
     Ok(Some(ProfileView {
         initial,
         display_name: display_name.unwrap_or_else(|| username.clone()),
@@ -465,6 +488,10 @@ pub async fn load_profile(
         bio,
         joined_display: created_at.format("%B %Y").to_string(),
         post_count,
+        follower_count,
+        following_count,
+        is_following,
+        can_follow,
         thumbs,
     }))
 }

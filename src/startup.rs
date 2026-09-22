@@ -5,7 +5,7 @@ use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
 use crate::guards::require_datastar_request_header;
 use actix_web::middleware::from_fn;
-use crate::routes::{api, auth, feed, health_check, media_rotate, media_serving, pages, profile, upload};
+use crate::routes::{api, auth, feed, health_check, media_rotate, media_serving, pages, profile, social, upload};
 use crate::services::geocode::Geocoder;
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
 use crate::services::RateLimiter;
@@ -178,6 +178,8 @@ async fn run(
             .route("/", web::get().to(feed::get_feed))
             .route("/recent", web::get().to(feed::get_recent))
             .route("/u/{username}", web::get().to(profile::get_profile))
+            .route("/u/{username}/followers", web::get().to(social::get_followers_page))
+            .route("/u/{username}/following", web::get().to(social::get_following_page))
             .route("/hashtags/{tag}", web::get().to(feed::get_hashtag_feed))
             // Classic form auth: full-page POSTs with SameSite=Lax protection
             .route("/register", web::get().to(auth::get_register_page))
@@ -196,6 +198,14 @@ async fn run(
             .service(
                 web::scope("/fragments")
                     .route("/feed", web::get().to(feed::feed_fragment))
+                    .route(
+                        "/users/{username}/follow",
+                        web::post().to(social::follow_user),
+                    )
+                    .route(
+                        "/users/{username}/follow",
+                        web::delete().to(social::unfollow_user),
+                    )
                     .wrap(from_fn(require_datastar_request_header)),
             )
             .service(ActixFiles::new("/static", "static").prefer_utf8(true))

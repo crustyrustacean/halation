@@ -8,5 +8,6 @@ mod feed;
 mod helpers;
 mod pages;
 mod rotate;
+mod social;
 mod session_store;
 mod upload;

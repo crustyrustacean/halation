@@ -9,6 +9,7 @@ pub mod media_rotate;
 pub mod media_serving;
 pub mod pages;
 pub mod profile;
+pub mod social;
 pub mod upload;
 
 // re-exports
@@ -20,4 +21,5 @@ pub use media_rotate::*;
 pub use media_serving::*;
 pub use pages::*;
 pub use profile::*;
+pub use social::*;
 pub use upload::*;

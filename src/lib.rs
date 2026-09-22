@@ -3,6 +3,7 @@
 // module declarations
 pub mod authentication;
 pub mod configuration;
+pub mod follows;
 pub mod guards;
 pub mod posts;
 pub mod routes;

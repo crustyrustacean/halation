@@ -6,6 +6,7 @@ use crate::template::TemplateRenderer;
 use actix_identity::Identity;
 use actix_web::{Error, HttpResponse, web};
 use serde::Serialize;
+use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ProfilePageContext {
@@ -26,8 +27,12 @@ pub async fn get_profile(
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
+    let viewer = identity
+        .as_ref()
+        .and_then(|i| i.id().ok())
+        .and_then(|s| Uuid::parse_str(&s).ok());
 
-    let profile = posts::load_profile(pool.get_ref(), &username)
+    let profile = posts::load_profile(pool.get_ref(), &username, viewer)
         .await
         .map_err(|e| crate::utils::e500(e))?;
     match profile {

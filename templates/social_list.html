@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="feed-title">{{ heading }}</h2>
+<section class="card">
+    <ul class="account-list">
+    {% for account in accounts %}
+        <li>
+            <a href="/u/{{ account.username }}">
+                <span class="avatar-mini">{{ account.initial }}</span>
+                <span class="account-names">
+                    <span class="display">{{ account.display_name }}</span>
+                    <span class="handle">@{{ account.username }}</span>
+                </span>
+            </a>
+        </li>
+    {% endfor %}
+    </ul>
+    {% if accounts | length == 0 %}<p class="empty">Nobody yet.</p>{% endif %}
+</section>
+{% endblock %}
