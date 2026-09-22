@@ -7,7 +7,6 @@ use actix_identity::Identity;
 use actix_web::{Error, HttpResponse, Either, web};
 use datastar::actix::Sse;
 use datastar::prelude::{ElementPatchMode, PatchElements};
-use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -20,12 +19,6 @@ fn viewer_id(identity: Option<&Identity>) -> Result<Option<Uuid>, Error> {
         }
         None => Ok(None),
     }
-}
-
-#[derive(Serialize)]
-struct FollowButtonContext {
-    username: String,
-    is_following: bool,
 }
 
 fn follow_button(
@@ -105,14 +98,6 @@ pub async fn unfollow_user(
 
     let html = follow_button(templates.get_ref().as_ref(), &username, false)?;
     Ok(Either::Right(button_swap(html)))
-}
-
-#[derive(Serialize)]
-struct SocialListContext {
-    title: String,
-    heading: String,
-    logged_in: bool,
-    accounts: Vec<follows::AccountSummary>,
 }
 
 async fn render_social_list(
