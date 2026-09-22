@@ -148,7 +148,16 @@ Copy **the whole line** — everything on it, no trailing newline.
 ### 4d. Teach git on the droplet to use this key
 
 Without this step, `git clone` tries your droplet's default keys and
-fails with `Permission denied (publickey)`:
+fails with `Permission denied (publickey)`: SSH never goes fishing for
+keys with custom names — it offers only the default set
+(`id_ed25519`, `id_rsa`, ...) unless told otherwise.
+
+The command is a heredoc — shell for "append the following lines to
+this file" — and it adds one entry to `~/.ssh/config`, the SSH
+client's address book: *"when connecting to the host `github.com`,
+offer the private key at `~/.ssh/halation_deploy`."* (`IdentityFile`
+always names the private half; ssh derives and offers the public half
+itself — the private key never leaves the machine.)
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
@@ -156,6 +165,10 @@ Host github.com
   IdentityFile ~/.ssh/halation_deploy
 EOF
 ```
+
+Prefer doing it by hand? `nano ~/.ssh/config` and add the same two
+lines at the bottom — identical result. (`>>` appends; never `>` on a
+config you already have.)
 
 ### 4e. Verify, then clone
 
