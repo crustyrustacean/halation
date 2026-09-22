@@ -86,7 +86,6 @@ cp /root/.ssh/authorized_keys /home/jeff/.ssh/authorized_keys
 chown -R jeff:jeff /home/jeff
 chmod 700 /home/jeff/.ssh
 chmod 600 /home/jeff/.ssh/authorized_keys
-chown -R jeff:jeff /opt/halation
 ```
 
 From your laptop, verify **before** hardening anything:
@@ -169,6 +168,8 @@ ssh -T git@github.com
 git clone -b trunk git@github.com:crustyrustacean/halation.git /opt/halation
 cd /opt/halation
 ```
+
+(Files from the clone are already owned by `jeff` — you cloned as jeff. The `chown` from the earlier draft is unnecessary and gone.)
 
 ## 5. Configure
 
