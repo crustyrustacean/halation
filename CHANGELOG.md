@@ -24,6 +24,28 @@ All notable changes to the Halation project will be documented in this file.
   covers auth, CSRF, ownership, idempotency, graph persistence,
   list pages, and the round trip
 
+## [0.11.0] - 2026-09-22
+
+### Phase 4 — the social graph
+
+- **Migration**: `follows` (composite PK = idempotent follows, cascade
+  delete, both lookup indexes)
+- **Follow store** (`follows.rs`): follow/unfollow (idempotent),
+  is_following, follower/following counts, follower/following account
+  lists (with server-computed avatar initials), user lookup by username
+- **Follow/unfollow fragments**: `POST/DELETE
+  /fragments/users/{username}/follow` inside the CSRF-guarded scope —
+  returns the follow-button partial (Datastar swaps it in place);
+  401 anon, 403 without `Datastar-Request`, 404 unknown account,
+  400 self-follow; idempotent duplicates
+- **Profile page**: follower/following counts (linked to list pages) and
+  the follow button (owner and anonymous visitors see none)
+- **Follower/following list pages** at
+  `/u/{username}/followers` and `/following` — unknown accounts 404
+- 74 tests green (34 lib + 40 API), zero warnings. New social suite
+  covers auth, CSRF, ownership, idempotency, graph persistence,
+  list pages, and the round trip
+
 ## [0.10.0] - 2026-09-21
 
 ### Added — deployment stack (droplet-ready)
