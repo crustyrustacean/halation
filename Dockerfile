@@ -22,7 +22,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 # Now the actual source
 COPY . .
-RUN cargo build --release --bin halation
+RUN cargo build --release --bin halation --bin backfill_media_keys
 
 # ---- Stage 4: Runtime — slim image with only what's needed to run ----
 FROM debian:bookworm-slim AS runtime
@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=builder /app/target/release/halation /app/halation
+COPY --from=builder /app/target/release/backfill_media_keys /app/backfill_media_keys
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
 COPY --from=builder /app/configuration /app/configuration

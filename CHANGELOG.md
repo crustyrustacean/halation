@@ -2,6 +2,32 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [Unreleased]
+
+### Changed — per-user storage partitioning
+
+Media objects are now owner-scoped in object storage. Keys move from the
+global `{media_id}/…` namespace to `{owner_id}/{media_id}/…`, making each
+user's media a prefix operation (bulk list/delete, audits) and keeping a
+literal per-user-bucket backend open as a future option.
+
+- `media_key(owner, media, name)` is the single key construction point
+  (`services/media.rs`); `is_legacy_key` detects pre-partitioning keys
+- `process_and_store` / `store_derivatives` take the owner and write
+  owner-scoped keys — the upload route passes the uploading user, rotate
+  passes the media's owner
+- **`backfill_media_keys` bin** migrates existing objects: copy-then-update
+  (rows repointed in one transaction only after every object is copied),
+  legacy objects left in place, idempotent, `--dry-run` supported. Ships in
+  the deploy image; on the droplet:
+  `docker compose exec app /app/backfill_media_keys --dry-run`
+- Dockerfile builds and ships both binaries
+- Serving is unchanged: `/media/{media_id}/{variant}` resolves keys through
+  the database, so URLs and browser caches are unaffected
+
+*80 tests green (37 lib + 40 API + 3 backfill), zero warnings on
+`--all-targets`.*
+
 ## [0.12.0] - 2026-10-01
 
 ### Changed — relational storage behind a `DatabaseBackend` trait
