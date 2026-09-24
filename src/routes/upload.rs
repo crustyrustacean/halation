@@ -114,7 +114,7 @@ pub async fn post_upload(
         let raw = std::fs::read(file.file.path())
             .map_err(|e| crate::utils::e500(format!("temp file vanished: {e}")))?;
 
-        match media::process_and_store(storage.get_ref().as_ref(), &raw).await {
+        match media::process_and_store(storage.get_ref().as_ref(), user_id, &raw).await {
             Ok(stored) => stored_media.push(stored),
             Err(MediaError::InvalidImage) => {
                 return render_error(

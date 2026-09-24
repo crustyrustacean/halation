@@ -268,6 +268,32 @@ Docker ports.
 
 ## 10. Maintenance
 
+### Media key layout & the backfill bin
+
+Media objects live at owner-scoped keys in the R2 bucket:
+
+```
+{owner_id}/{media_id}/original.{ext}   ← owner-private (carries EXIF)
+{owner_id}/{media_id}/{thumb|medium|large}.jpg
+```
+
+Objects written before partitioning (2026-09) still sit at legacy
+`{media_id}/…` keys until the one-off backfill runs. The deploy image ships
+`backfill_media_keys` alongside the app; it copies every legacy object to
+its owner-scoped key and repoints the database rows (copy-then-update in a
+single transaction, legacy objects left in place, safe to re-run):
+
+```bash
+cd /opt/halation
+docker compose exec app /app/backfill_media_keys --dry-run   # preview
+docker compose exec app /app/backfill_media_keys             # migrate
+```
+
+Afterwards the legacy objects are unreferenced duplicates — delete them in
+the Cloudflare R2 dashboard once the site verifies clean.
+
+### Deploy an update
+
 - **Deploy an update**: build locally, `docker save | ssh … docker load`
   (step 6), then on the droplet `cd /opt/halation && docker compose up -d`
 - **Logs**: `docker compose logs -f app`

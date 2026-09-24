@@ -328,14 +328,36 @@ fn derivative_image(img: &DynamicImage, variant: &str) -> DynamicImage {
     }
 }
 
+// ---------------------------------------------------------------------------
+// storage keys
+// ---------------------------------------------------------------------------
+
+/// The storage key of a media object: `{owner_id}/{media_id}/{name}`.
+/// Ownership is the first segment by design (per-user partitioning): bulk
+/// per-user operations become prefix operations, and a future backend could
+/// map the segment to a literal per-user bucket without another data
+/// migration. Single construction point — the pipeline and the backfill
+/// bin both go through here.
+pub fn media_key(owner_id: Uuid, media_id: Uuid, name: &str) -> String {
+    format!("{owner_id}/{media_id}/{name}")
+}
+
+/// True when `storage_key` predates owner partitioning — it does not carry
+/// `owner_id` as its first segment and needs the backfill bin
+/// (`src/bin/backfill_media_keys.rs`).
+pub fn is_legacy_key(owner_id: Uuid, storage_key: &str) -> bool {
+    !storage_key.starts_with(&format!("{owner_id}/"))
+}
+
 // The pipeline: sniff → decode (HEIC converts to JPEG) → EXIF → sha256 →
 /// derivatives (thumb/medium/large, all EXIF-free by construction) → save
-/// everything under `{media_id}/…` keys.
+/// everything under `{owner_id}/{media_id}/…` keys.
 /// Generate and store the derivative set for an image under
-/// `{media_id}/{variant}.jpg`. Used by the upload pipeline and again by
-/// the rotate flow (same keys, new pixels, new dimensions).
+/// `{owner_id}/{media_id}/{variant}.jpg`. Used by the upload pipeline and
+/// again by the rotate flow (same keys, new pixels, new dimensions).
 pub(crate) async fn store_derivatives(
     storage: &dyn StorageBackend,
+    owner_id: Uuid,
     media_id: Uuid,
     img: &DynamicImage,
 ) -> Result<Vec<Derivative>, MediaError> {
@@ -343,7 +365,7 @@ pub(crate) async fn store_derivatives(
     for variant in ["thumb", "medium", "large"] {
         let derived = derivative_image(img, variant);
         let encoded = encode_jpeg(&derived)?;
-        let key = format!("{media_id}/{variant}.jpg");
+        let key = media_key(owner_id, media_id, &format!("{variant}.jpg"));
         storage
             .save(&key, Bytes::from(encoded.clone()))
             .await
@@ -365,6 +387,7 @@ pub(crate) async fn store_derivatives(
 
 pub async fn process_and_store(
     storage: &dyn StorageBackend,
+    owner_id: Uuid,
     raw: &[u8],
 ) -> Result<StoredMedia, MediaError> {
     let (img, mime_type) = decode_image(raw)?;
@@ -374,13 +397,17 @@ pub async fn process_and_store(
     let (width, height) = (img.width(), img.height());
     let sha256 = sha256_hex(raw);
 
-    let original_key = format!("{media_id}/original.{}", extension_for(&mime_type));
+    let original_key = media_key(
+        owner_id,
+        media_id,
+        &format!("original.{}", extension_for(&mime_type)),
+    );
     storage
         .save(&original_key, Bytes::copy_from_slice(raw))
         .await
         .map_err(|e| MediaError::Operation(anyhow!("Failed to store original: {e}")))?;
 
-    let derivatives = store_derivatives(storage, media_id, &img).await?;
+    let derivatives = store_derivatives(storage, owner_id, media_id, &img).await?;
 
     Ok(StoredMedia {
         media_id,
@@ -416,17 +443,22 @@ mod tests {
     async fn pipeline_produces_original_and_three_variants() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = test_jpeg(1600, 1000);
 
         // Act
-        let stored = process_and_store(&storage, &raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
 
         // Assert
         assert_eq!((1600, 1000), (stored.width, stored.height));
         assert_eq!("image/jpeg", stored.mime_type);
         assert_eq!(3, stored.derivatives.len());
         assert_eq!(64, stored.sha256.len(), "sha256 hex digest");
-        assert!(stored.storage_key.ends_with("/original.jpg"));
+        assert_eq!(
+            media_key(owner, stored.media_id, "original.jpg"),
+            stored.storage_key,
+            "original lives at the owner-scoped original.jpg key"
+        );
         for derivative in &stored.derivatives {
             let bytes = storage.find(&derivative.storage_key).await.unwrap();
             assert_eq!(
@@ -441,10 +473,11 @@ mod tests {
     async fn derivative_dimensions_follow_the_variant_contract() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = test_jpeg(1600, 1000);
 
         // Act
-        let stored = process_and_store(&storage, &raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
         let by_variant: HashMap<&str, (u32, u32)> = stored
             .derivatives
             .iter()
@@ -469,10 +502,11 @@ mod tests {
     async fn small_sources_are_never_upscaled_except_thumb() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = test_jpeg(400, 300);
 
         // Act
-        let stored = process_and_store(&storage, &raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
         let by_variant: HashMap<&str, (u32, u32)> = stored
             .derivatives
             .iter()
@@ -489,10 +523,11 @@ mod tests {
     async fn derivatives_are_exif_free() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = test_jpeg(800, 600);
 
         // Act
-        let stored = process_and_store(&storage, &raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
 
         // Assert — no derivative contains an EXIF APP1 segment marker
         for derivative in &stored.derivatives {
@@ -510,10 +545,11 @@ mod tests {
         // Arrange — a landscape 1600x1000 JPEG whose EXIF says "rotate 90 CW"
         // (orientation 6: the classic portrait phone photo)
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = jpeg_with_exif_app1(test_jpeg(1600, 1000), exif_tiff(Some("Test"), Some(6)));
 
         // Act
-        let stored = process_and_store(&storage, &raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
 
         // Assert — dimensions are swapped: the stored image is portrait
         assert_eq!((1000, 1600), (stored.width, stored.height));
@@ -531,9 +567,10 @@ mod tests {
     async fn corrupt_input_yields_invalid_image() {
         // Arrange
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
 
         // Act
-        let result = process_and_store(&storage, b"definitely not an image").await;
+        let result = process_and_store(&storage, owner, b"definitely not an image").await;
 
         // Assert
         assert!(matches!(result, Err(MediaError::InvalidImage)));
@@ -543,15 +580,80 @@ mod tests {
     async fn heic_input_converts_through_the_pipeline() {
         // Arrange — real HEIC fixture borrowed from metallian-photos
         let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
         let raw = include_bytes!("../../tests/fixtures/IMG_2215.HEIC");
 
         // Act
-        let stored = process_and_store(&storage, raw).await.unwrap();
+        let stored = process_and_store(&storage, owner, raw).await.unwrap();
 
         // Assert — original kept as HEIC; derivatives are working JPEGs
         assert_eq!("image/heic", stored.mime_type);
         assert_eq!(3, stored.derivatives.len());
         assert!(stored.width > 0 && stored.height > 0);
+    }
+
+    #[tokio::test]
+    async fn keys_are_owner_scoped() {
+        // Arrange
+        let storage = InMemoryStorageBackend::new();
+        let owner = Uuid::new_v4();
+        let raw = test_jpeg(1600, 1000);
+
+        // Act
+        let stored = process_and_store(&storage, owner, &raw).await.unwrap();
+
+        // Assert — the original and every derivative live under
+        // {owner_id}/{media_id}/… (per-user partitioning, pi-brain 81156523)
+        let prefix = format!("{owner}/");
+        assert!(
+            storage.find(&stored.storage_key).await.is_ok(),
+            "original is stored at the owner-scoped key {}",
+            stored.storage_key
+        );
+        for derivative in &stored.derivatives {
+            assert!(
+                derivative.storage_key.starts_with(&prefix),
+                "{} must be owner-scoped",
+                derivative.storage_key
+            );
+            assert!(storage.find(&derivative.storage_key).await.is_ok());
+        }
+    }
+
+    #[test]
+    fn media_key_places_ownership_first() {
+        // Arrange
+        let owner = Uuid::new_v4();
+        let media = Uuid::new_v4();
+
+        // Act
+        let key = media_key(owner, media, "original.jpg");
+
+        // Assert — ownership is the first segment: bulk per-user operations
+        // become prefix operations
+        assert_eq!(format!("{owner}/{media}/original.jpg"), key);
+    }
+
+    #[test]
+    fn legacy_keys_are_those_without_the_owning_owner_segment() {
+        // Arrange
+        let owner = Uuid::new_v4();
+        let media = Uuid::new_v4();
+        let other = Uuid::new_v4();
+
+        // Act / Assert
+        assert!(
+            is_legacy_key(owner, &format!("{media}/original.jpg")),
+            "pre-partitioning keys carry no owner segment"
+        );
+        assert!(!is_legacy_key(
+            owner,
+            &media_key(owner, media, "original.jpg")
+        ));
+        assert!(
+            is_legacy_key(owner, &media_key(other, media, "original.jpg")),
+            "a key scoped to a different owner is still legacy for this owner"
+        );
     }
 
     /// Hand-built minimal EXIF: JPEG SOI + APP1 carrying a little-endian

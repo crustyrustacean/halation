@@ -57,9 +57,10 @@ pub async fn rotate_media(
     let new_rotation = (info.rotation + 90) % 360;
     img = media::rotate_cw(&img, (new_rotation as u32) / 90);
 
-    let derivatives = media::store_derivatives(storage.get_ref().as_ref(), media_id, &img)
-        .await
-        .map_err(crate::utils::e500)?;
+    let derivatives =
+        media::store_derivatives(storage.get_ref().as_ref(), info.owner_id, media_id, &img)
+            .await
+            .map_err(crate::utils::e500)?;
 
     // One store call bumps the version and persists the regenerated
     // derivatives — dimensions, sizes, and storage keys — so the database
