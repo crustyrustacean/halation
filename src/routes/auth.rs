@@ -1,9 +1,8 @@
 // src/routes/auth.rs
 
 // dependencies
-use crate::authentication::{
-    NewUser, UserStoreError, find_by_identifier, hash_password, insert_user, verify_password,
-};
+use crate::authentication::{NewUser, UserStoreError, hash_password, verify_password};
+use crate::database::DatabaseBackend;
 use crate::services::RateLimiter;
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
@@ -118,7 +117,11 @@ pub async fn get_register_page(
         email: None,
     };
 
-    let body = render_page(templates.get_ref().as_ref(), "register.html", &serde_json::to_value(&context)?)?;
+    let body = render_page(
+        templates.get_ref().as_ref(),
+        "register.html",
+        &serde_json::to_value(&context)?,
+    )?;
     Ok(html(actix_web::http::StatusCode::OK, body))
 }
 
@@ -126,7 +129,7 @@ pub async fn post_register(
     req: HttpRequest,
     form: web::Form<RegisterFormData>,
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     rate_limiter: web::Data<RateLimiter>,
 ) -> Result<HttpResponse, Error> {
     // Rate limit per IP: 5 per 15 minutes, burst 5
@@ -141,10 +144,12 @@ pub async fn post_register(
                 "errors": ["Too many attempts. Try again shortly."],
             }),
         )?;
-        return Ok(HttpResponse::build(actix_web::http::StatusCode::TOO_MANY_REQUESTS)
-            .insert_header(("Retry-After", decision.retry_after_seconds.to_string()))
-            .content_type("text/html")
-            .body(body));
+        return Ok(
+            HttpResponse::build(actix_web::http::StatusCode::TOO_MANY_REQUESTS)
+                .insert_header(("Retry-After", decision.retry_after_seconds.to_string()))
+                .content_type("text/html")
+                .body(body),
+        );
     }
 
     let context = |errors: Vec<String>| {
@@ -161,22 +166,27 @@ pub async fn post_register(
     {
         Ok(pair) => pair,
         Err(errors) => {
-            let body = render_page(templates.get_ref().as_ref(), "register.html", &context(errors))?;
-            return Ok(html(actix_web::http::StatusCode::UNPROCESSABLE_ENTITY, body));
+            let body = render_page(
+                templates.get_ref().as_ref(),
+                "register.html",
+                &context(errors),
+            )?;
+            return Ok(html(
+                actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
+                body,
+            ));
         }
     };
 
     let password_hash = hash_password(&form.password).map_err(crate::utils::e500)?;
 
-    match insert_user(
-        pool.get_ref(),
-        &NewUser {
+    match db
+        .insert_user(NewUser {
             username,
             email,
             password_hash,
-        },
-    )
-    .await
+        })
+        .await
     {
         Ok(_) => Ok(HttpResponse::SeeOther()
             .insert_header(("Location", "/login?registered=1"))
@@ -238,7 +248,11 @@ pub async fn get_login_page(
         email: None,
     };
 
-    let body = render_page(templates.get_ref().as_ref(), "login.html", &serde_json::to_value(&context)?)?;
+    let body = render_page(
+        templates.get_ref().as_ref(),
+        "login.html",
+        &serde_json::to_value(&context)?,
+    )?;
     Ok(html(actix_web::http::StatusCode::OK, body))
 }
 
@@ -246,7 +260,7 @@ pub async fn post_login(
     req: HttpRequest,
     form: web::Form<LoginFormData>,
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     rate_limiter: web::Data<RateLimiter>,
 ) -> Result<HttpResponse, Error> {
     let ip = peer_ip(&req);
@@ -265,10 +279,12 @@ pub async fn post_login(
                 "username": form.identifier,
             }),
         )?;
-        return Ok(HttpResponse::build(actix_web::http::StatusCode::TOO_MANY_REQUESTS)
-            .insert_header(("Retry-After", decision.retry_after_seconds.to_string()))
-            .content_type("text/html")
-            .body(body));
+        return Ok(
+            HttpResponse::build(actix_web::http::StatusCode::TOO_MANY_REQUESTS)
+                .insert_header(("Retry-After", decision.retry_after_seconds.to_string()))
+                .content_type("text/html")
+                .body(body),
+        );
     }
 
     let login_context = |errors: Vec<String>| {
@@ -292,22 +308,21 @@ pub async fn post_login(
         html(actix_web::http::StatusCode::UNAUTHORIZED, body)
     };
 
-    let user = match find_by_identifier(pool.get_ref(), &identifier).await {
+    let user = match db.find_user_by_identifier(&identifier).await {
         Ok(Some(user)) => user,
         Ok(None) => return Ok(failure().await),
         Err(e) => return Err(crate::utils::e500(e)),
     };
 
-    let password_ok = verify_password(&form.password, &user.password_hash)
-        .map_err(crate::utils::e500)?;
+    let password_ok =
+        verify_password(&form.password, &user.password_hash).map_err(crate::utils::e500)?;
     if !password_ok {
         return Ok(failure().await);
     }
 
     // Establish identity (actix-identity stores it inside the session) and
     // plant the metadata our SessionStore lifts into queryable columns.
-    Identity::login(&req.extensions(), user.id.to_string())
-        .map_err(crate::utils::e500)?;
+    Identity::login(&req.extensions(), user.id.to_string()).map_err(crate::utils::e500)?;
 
     let session = req.get_session();
     session
@@ -324,7 +339,9 @@ pub async fn post_login(
             .map_err(crate::utils::e500)?;
     }
 
-    Ok(HttpResponse::SeeOther().insert_header(("Location", "/")).finish())
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/"))
+        .finish())
 }
 
 pub async fn post_logout(req: HttpRequest, identity: Option<Identity>) -> HttpResponse {

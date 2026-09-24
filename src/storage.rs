@@ -88,10 +88,7 @@ pub mod contract {
     pub async fn delete_removes_stored_bytes<S: StorageBackend>(storage: &S) {
         // Arrange — save some bytes so there is something to delete
         let key = Uuid::new_v4().to_string();
-        storage
-            .save(&key, Bytes::from_static(&[1]))
-            .await
-            .unwrap();
+        storage.save(&key, Bytes::from_static(&[1])).await.unwrap();
 
         // Act — delete, then attempt to find
         storage.delete(&key).await.unwrap();

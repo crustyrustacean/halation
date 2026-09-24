@@ -2,6 +2,42 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [Unreleased]
+
+### Changed — relational storage behind a `DatabaseBackend` trait
+
+Routes talked to `PgPool` directly, with SQL scattered across `posts.rs`,
+`follows.rs`, `users.rs`, and inline handler queries. The pattern
+metallian-photos uses lands here:
+
+- **`database.rs`** — `DatabaseError` (`NotFound`/`Operation`,
+  `ResponseError`, mirroring `StorageError`) and the async
+  `DatabaseBackend` trait: every relational operation the app performs,
+  named in domain terms.
+- **`database/postgres.rs`** — `PostgresDatabase { pool }`; every SQL
+  statement now lives in this one file.
+- **Routes** inject `web::Data<Box<dyn DatabaseBackend>>`; the raw pool
+  is no longer app data. The actix session store keeps its pool —
+  sessions are infrastructure, not domain storage.
+- **Store modules keep the types**: `posts.rs` (cards, views, hashtag
+  parsing, `MediaRotation`), `follows.rs` (`AccountSummary`),
+  `users.rs` (`User`/`NewUser`/`UserStoreError`). Their free SQL
+  functions moved into the trait implementation.
+- **Upload pipeline restructured**: every file is decoded and stored
+  first, then `create_post_with_media` persists post + hashtags + media
+  rows + derivative rows + links + location in one store-side
+  transaction — no DB connection is held across image decode or object
+  storage I/O anymore.
+- **Rotation** persists regenerated derivatives' storage keys alongside
+  dimensions and sizes, keeping the database the single source of truth
+  for where bytes live (also the hook for the planned per-user storage
+  partitioning).
+- Removed the superseded `insert_media`/`MediaRow` path from
+  `services/media.rs`; tidied five pre-existing warnings in test
+  targets (`cargo clippy` without `--all-targets` skips tests).
+
+74 tests green (34 lib + 40 API).
+
 ## [0.11.0] - 2026-09-22
 
 ### Phase 4 — the social graph

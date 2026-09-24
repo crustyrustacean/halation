@@ -3,14 +3,15 @@
 // dependencies
 use crate::authentication::PostgresSessionStore;
 use crate::configuration::{DatabaseSettings, Settings};
+use crate::database::{DatabaseBackend, PostgresDatabase};
 use crate::guards::require_datastar_request_header;
-use actix_web::middleware::from_fn;
-use crate::routes::{api, auth, feed, health_check, media_rotate, media_serving, pages, profile, social, upload};
-use crate::services::geocode::Geocoder;
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
+use crate::routes::{
+    api, auth, feed, health_check, media_rotate, media_serving, pages, profile, social, upload,
+};
 use crate::services::RateLimiter;
+use crate::services::geocode::Geocoder;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
-use anyhow::Context as _;
 use crate::template::{TemplateRenderer, tera::TeraRenderer};
 use actix_files::Files as ActixFiles;
 use actix_identity::IdentityMiddleware;
@@ -18,7 +19,9 @@ use actix_session::SessionMiddleware;
 use actix_session::config::PersistentSession;
 use actix_web::cookie::Key;
 use actix_web::dev::Server;
+use actix_web::middleware::from_fn;
 use actix_web::{App, HttpServer, web};
+use anyhow::Context as _;
 use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, PgPool};
@@ -81,7 +84,9 @@ async fn ensure_database_exists(settings: &DatabaseSettings) -> Result<(), anyho
     match sqlx::PgConnection::connect_with(&settings.connect_options()).await {
         // Database exists and accepts our credentials.
         Ok(conn) => {
-            conn.close().await.context("Failed to close probe connection")?;
+            conn.close()
+                .await
+                .context("Failed to close probe connection")?;
             Ok(())
         }
         Err(e) => {
@@ -92,7 +97,9 @@ async fn ensure_database_exists(settings: &DatabaseSettings) -> Result<(), anyho
                 return Err(anyhow::anyhow!(
                     "Failed to connect to Postgres at {}:{} as {} — is the dev \
                      container running? (scripts/init_dev_db.sh starts it.)\n\t{e}",
-                    settings.host, settings.port, settings.username
+                    settings.host,
+                    settings.port,
+                    settings.username
                 ));
             }
 
@@ -119,7 +126,10 @@ async fn run(
     db_pool: PgPool,
     configuration: Settings,
 ) -> Result<Server, anyhow::Error> {
-    let db_pool = web::Data::new(db_pool);
+    // Routes see the domain trait; the raw pool stays an implementation
+    // detail of the Postgres backend and the session store.
+    let database: Box<dyn DatabaseBackend> = Box::new(PostgresDatabase::new(db_pool.clone()));
+    let database = web::Data::new(database);
 
     let template_renderer: web::Data<Box<dyn TemplateRenderer>> =
         web::Data::new(Box::new(TeraRenderer::new()?));
@@ -130,8 +140,7 @@ async fn run(
     };
     let storage_backend = web::Data::new(storage);
 
-    let rate_limiter =
-        web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
+    let rate_limiter = web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
     let geocoder = web::Data::new(Geocoder::new(
         configuration.geocode.enabled,
         configuration.geocode.base_url.clone(),
@@ -140,7 +149,7 @@ async fn run(
     // SessionMiddleware contains Rc internals and must be constructed per
     // worker inside the closure; the pool-backed store and the signing key
     // bytes are Send + Clone, so they cross the boundary instead.
-    let session_store = PostgresSessionStore::new(db_pool.get_ref().clone());
+    let session_store = PostgresSessionStore::new(db_pool.clone());
     let secret_key_bytes = configuration
         .secrets
         .session_signing_key
@@ -149,15 +158,13 @@ async fn run(
         .to_vec();
 
     let server = HttpServer::new(move || {
-        let session_middleware = SessionMiddleware::builder(
-                session_store.clone(),
-                Key::from(&secret_key_bytes),
-            )
-            .session_lifecycle(
-                PersistentSession::default()
-                    .session_ttl(actix_web::cookie::time::Duration::days(SESSION_TTL_DAYS)),
-            )
-            .build();
+        let session_middleware =
+            SessionMiddleware::builder(session_store.clone(), Key::from(&secret_key_bytes))
+                .session_lifecycle(
+                    PersistentSession::default()
+                        .session_ttl(actix_web::cookie::time::Duration::days(SESSION_TTL_DAYS)),
+                )
+                .build();
 
         App::new()
             .wrap(TracingLogger::default())
@@ -171,15 +178,19 @@ async fn run(
             .route("/health_check", web::get().to(health_check))
             .service(
                 web::scope("/api")
-                    .service(
-                        web::scope("/v1").route("/health", web::get().to(api::deep_health)),
-                    ),
+                    .service(web::scope("/v1").route("/health", web::get().to(api::deep_health))),
             )
             .route("/", web::get().to(feed::get_feed))
             .route("/recent", web::get().to(feed::get_recent))
             .route("/u/{username}", web::get().to(profile::get_profile))
-            .route("/u/{username}/followers", web::get().to(social::get_followers_page))
-            .route("/u/{username}/following", web::get().to(social::get_following_page))
+            .route(
+                "/u/{username}/followers",
+                web::get().to(social::get_followers_page),
+            )
+            .route(
+                "/u/{username}/following",
+                web::get().to(social::get_following_page),
+            )
             .route("/hashtags/{tag}", web::get().to(feed::get_hashtag_feed))
             // Classic form auth: full-page POSTs with SameSite=Lax protection
             .route("/register", web::get().to(auth::get_register_page))
@@ -191,8 +202,14 @@ async fn run(
             .route("/upload", web::get().to(upload::get_upload_page))
             .route("/upload", web::post().to(upload::post_upload))
             .route("/p/{post_id}", web::get().to(upload::get_post_page))
-            .route("/fragments/media/{media_id}/rotate", web::post().to(media_rotate::rotate_media))
-            .route("/media/{media_id}/{variant}", web::get().to(media_serving::get_media_derivative))
+            .route(
+                "/fragments/media/{media_id}/rotate",
+                web::post().to(media_rotate::rotate_media),
+            )
+            .route(
+                "/media/{media_id}/{variant}",
+                web::get().to(media_serving::get_media_derivative),
+            )
             // Datastar fragment endpoints live under this scope; every
             // mutation must carry the Datastar-Request header or 403.
             .service(
@@ -210,7 +227,7 @@ async fn run(
             )
             .service(ActixFiles::new("/static", "static").prefer_utf8(true))
             .default_service(web::to(pages::not_found))
-            .app_data(db_pool.clone())
+            .app_data(database.clone())
             .app_data(template_renderer.clone())
             .app_data(storage_backend.clone())
             .app_data(rate_limiter.clone())

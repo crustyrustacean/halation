@@ -2,10 +2,12 @@
 
 // dependencies
 use actix_web::{
-    Error, http::Method, middleware::Next,
+    Error,
     body::MessageBody,
     dev::{ServiceRequest, ServiceResponse},
+    http::Method,
     http::StatusCode,
+    middleware::Next,
 };
 use thiserror::Error;
 
@@ -87,7 +89,10 @@ mod tests {
         };
 
         // Assert
-        assert_eq!(error.as_response_error().status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            error.as_response_error().status_code(),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]

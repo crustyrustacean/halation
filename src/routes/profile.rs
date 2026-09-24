@@ -1,6 +1,7 @@
 // src/routes/profile.rs
 
 // dependencies
+use crate::database::DatabaseBackend;
 use crate::posts;
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
@@ -22,7 +23,7 @@ struct ProfilePageContext {
 /// carry an email or password hash.
 pub async fn get_profile(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -32,7 +33,8 @@ pub async fn get_profile(
         .and_then(|i| i.id().ok())
         .and_then(|s| Uuid::parse_str(&s).ok());
 
-    let profile = posts::load_profile(pool.get_ref(), &username, viewer)
+    let profile = db
+        .load_profile(&username, viewer)
         .await
         .map_err(crate::utils::e500)?;
     match profile {
@@ -60,7 +62,9 @@ pub async fn get_profile(
                 "logged_in": identity.is_some(),
             });
             let body = templates.render("error.html", &context)?;
-            Ok(HttpResponse::NotFound().content_type("text/html").body(body))
+            Ok(HttpResponse::NotFound()
+                .content_type("text/html")
+                .body(body))
         }
     }
 }

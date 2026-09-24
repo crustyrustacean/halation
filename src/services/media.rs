@@ -4,7 +4,6 @@
 use crate::storage::StorageBackend;
 use anyhow::{Context, anyhow};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
 use image::DynamicImage;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -158,9 +157,7 @@ fn exif_string(exif: &exif::Exif, tag: exif::Tag) -> Option<String> {
     let field = exif.get_field(tag, exif::In::PRIMARY)?;
     // kamadak's display_value quotes ASCII values; read them raw instead
     let value = match &field.value {
-        exif::Value::Ascii(vecs) => {
-            vecs.first().map(|v| String::from_utf8_lossy(v).to_string())
-        }
+        exif::Value::Ascii(vecs) => vecs.first().map(|v| String::from_utf8_lossy(v).to_string()),
         _ => Some(field.display_value().to_string()),
     };
     value.filter(|s| !s.is_empty())
@@ -204,9 +201,7 @@ fn gps_decimal(
 /// EXIF (common for re-encoded images) yields `None`, not an error.
 pub fn extract_exif(raw: &[u8]) -> Option<serde_json::Value> {
     let mut cursor = Cursor::new(raw);
-    let exif = exif::Reader::new()
-        .read_from_container(&mut cursor)
-        .ok()?;
+    let exif = exif::Reader::new().read_from_container(&mut cursor).ok()?;
 
     let mut data = ExifData {
         date_time_original: exif_string(&exif, exif::Tag::DateTimeOriginal),
@@ -254,7 +249,10 @@ pub fn exif_orientation(raw: &[u8]) -> image::metadata::Orientation {
     exif::Reader::new()
         .read_from_container(&mut cursor)
         .ok()
-        .and_then(|exif| exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY).cloned())
+        .and_then(|exif| {
+            exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+                .cloned()
+        })
         .and_then(|field| match &field.value {
             exif::Value::Short(values) => values.first().map(|v| *v as u8),
             _ => None,
@@ -294,7 +292,11 @@ fn encode_jpeg(img: &DynamicImage) -> Result<Vec<u8>, MediaError> {
 /// preserve aspect ratio, cap the long edge, and never upscale.
 fn derivative_image(img: &DynamicImage, variant: &str) -> DynamicImage {
     match variant {
-        "thumb" => img.resize_to_fill(THUMB_EDGE, THUMB_EDGE, image::imageops::FilterType::Lanczos3),
+        "thumb" => img.resize_to_fill(
+            THUMB_EDGE,
+            THUMB_EDGE,
+            image::imageops::FilterType::Lanczos3,
+        ),
         "medium" => {
             let (w, h) = (img.width(), img.height());
             let long = w.max(h);
@@ -372,10 +374,7 @@ pub async fn process_and_store(
     let (width, height) = (img.width(), img.height());
     let sha256 = sha256_hex(raw);
 
-    let original_key = format!(
-        "{media_id}/original.{}",
-        extension_for(&mime_type)
-    );
+    let original_key = format!("{media_id}/original.{}", extension_for(&mime_type));
     storage
         .save(&original_key, Bytes::copy_from_slice(raw))
         .await
@@ -396,64 +395,6 @@ pub async fn process_and_store(
     })
 }
 
-// ---------------------------------------------------------------------------
-// DB helpers
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct MediaRow {
-    pub id: Uuid,
-    pub owner_id: Uuid,
-    pub storage_key: String,
-    pub mime_type: String,
-    pub width: i32,
-    pub height: i32,
-}
-
-pub async fn insert_media(
-    conn: &mut sqlx::PgConnection,
-    owner_id: Uuid,
-    stored: &StoredMedia,
-    created_at: Option<DateTime<Utc>>,
-) -> Result<Uuid, anyhow::Error> {
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO media (id, owner_id, storage_key, mime_type, width, height, size_bytes, sha256, exif, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, now()))
-         RETURNING id",
-    )
-    .bind(stored.media_id)
-    .bind(owner_id)
-    .bind(&stored.storage_key)
-    .bind(&stored.mime_type)
-    .bind(stored.width as i32)
-    .bind(stored.height as i32)
-    .bind(stored.size_bytes)
-    .bind(&stored.sha256)
-    .bind(&stored.exif)
-    .bind(created_at)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(|e| anyhow!("Failed to insert media: {e}"))?;
-
-    for derivative in &stored.derivatives {
-        sqlx::query(
-            "INSERT INTO media_derivatives (media_id, variant, storage_key, width, height, size_bytes)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(row.0)
-        .bind(derivative.variant)
-        .bind(&derivative.storage_key)
-        .bind(derivative.width as i32)
-        .bind(derivative.height as i32)
-        .bind(derivative.size_bytes)
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| anyhow!("Failed to insert derivative: {e}"))?;
-    }
-
-    Ok(row.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,9 +402,10 @@ mod tests {
     use std::collections::HashMap;
 
     fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
-        let img = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
-            image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
-        }));
+        let img =
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+            }));
         let mut buf = Vec::new();
         img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
             .unwrap();
@@ -511,8 +453,16 @@ mod tests {
 
         // Assert — thumb crops to a square; medium/large cap the long edge
         assert_eq!((THUMB_EDGE, THUMB_EDGE), by_variant["thumb"]);
-        assert_eq!((MEDIUM_EDGE, 400), by_variant["medium"], "1600x1000 → 640x400");
-        assert_eq!((LARGE_EDGE, 675), by_variant["large"], "1600x1000 → 1080x675");
+        assert_eq!(
+            (MEDIUM_EDGE, 400),
+            by_variant["medium"],
+            "1600x1000 → 640x400"
+        );
+        assert_eq!(
+            (LARGE_EDGE, 675),
+            by_variant["large"],
+            "1600x1000 → 1080x675"
+        );
     }
 
     #[tokio::test]
@@ -548,9 +498,7 @@ mod tests {
         for derivative in &stored.derivatives {
             let bytes = storage.find(&derivative.storage_key).await.unwrap();
             assert!(
-                !bytes
-                    .windows(6)
-                    .any(|window| window == b"Exif\0\0"),
+                !bytes.windows(6).any(|window| window == b"Exif\0\0"),
                 "{} must be EXIF-free",
                 derivative.variant
             );
@@ -562,17 +510,18 @@ mod tests {
         // Arrange — a landscape 1600x1000 JPEG whose EXIF says "rotate 90 CW"
         // (orientation 6: the classic portrait phone photo)
         let storage = InMemoryStorageBackend::new();
-        let raw = jpeg_with_exif_app1(
-            test_jpeg(1600, 1000),
-            exif_tiff(Some("Test"), Some(6)),
-        );
+        let raw = jpeg_with_exif_app1(test_jpeg(1600, 1000), exif_tiff(Some("Test"), Some(6)));
 
         // Act
         let stored = process_and_store(&storage, &raw).await.unwrap();
 
         // Assert — dimensions are swapped: the stored image is portrait
         assert_eq!((1000, 1600), (stored.width, stored.height));
-        let medium = stored.derivatives.iter().find(|d| d.variant == "medium").unwrap();
+        let medium = stored
+            .derivatives
+            .iter()
+            .find(|d| d.variant == "medium")
+            .unwrap();
         assert_eq!((400, 640), (medium.width, medium.height), "portrait medium");
         // EXIF (including the orientation tag itself) survives in the DB copy
         assert!(stored.exif.is_some());
@@ -642,12 +591,7 @@ mod tests {
         }
         if let Some(orientation) = orientation {
             // SHORT fits inline, left-justified in the 4-byte value field
-            entries.push((
-                0x0112,
-                3,
-                1,
-                vec![orientation as u8, 0, 0, 0],
-            ));
+            entries.push((0x0112, 3, 1, vec![orientation as u8, 0, 0, 0]));
         }
         entries.sort_by_key(|entry| entry.0); // TIFF requires ascending tags
 
@@ -699,12 +643,9 @@ mod tests {
         assert_eq!(exif["make"], "Test");
     }
 
-
     #[test]
     fn exif_absent_yields_none() {
         // Act / Assert
         assert!(extract_exif(&test_jpeg(50, 50)).is_none());
     }
 }
-
-

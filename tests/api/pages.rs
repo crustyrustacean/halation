@@ -10,7 +10,7 @@ async fn home_page_renders() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -32,7 +32,7 @@ async fn unknown_route_renders_the_404_page() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/definitely-not-a-page", &app.address))
+        .get(format!("{}/definitely-not-a-page", app.address))
         .send()
         .await
         .expect("Failed to execute request.");

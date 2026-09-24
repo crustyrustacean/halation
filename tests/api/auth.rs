@@ -3,7 +3,11 @@
 use crate::helpers::spawn_app;
 use uuid::Uuid;
 
-fn register_form<'a>(username: &'a str, email: &'a str, password: &'a str) -> [(&'a str, &'a str); 3] {
+fn register_form<'a>(
+    username: &'a str,
+    email: &'a str,
+    password: &'a str,
+) -> [(&'a str, &'a str); 3] {
     [
         ("username", username),
         ("email", email),
@@ -23,7 +27,7 @@ async fn login_page_renders_fresh() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/login", &app.address))
+        .get(format!("{}/login", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -42,7 +46,7 @@ async fn login_page_renders_the_registration_notice() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/login?registered=1", &app.address))
+        .get(format!("{}/login?registered=1", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -61,7 +65,7 @@ async fn register_page_renders_fresh() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/register", &app.address))
+        .get(format!("{}/register", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -80,7 +84,7 @@ async fn register_creates_account_and_redirects_to_login() {
     // Act
     let response = app
         .api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("jeff", "jeff@example.com", "hunter2hunter2"))
         .send()
         .await
@@ -96,12 +100,11 @@ async fn register_creates_account_and_redirects_to_login() {
             .and_then(|v| v.to_str().ok())
     );
 
-    let stored: (String, String) = sqlx::query_as(
-        "SELECT username::text, email::text FROM users WHERE username = 'jeff'",
-    )
-    .fetch_one(&app.db_pool)
-    .await
-    .expect("user should be persisted");
+    let stored: (String, String) =
+        sqlx::query_as("SELECT username::text, email::text FROM users WHERE username = 'jeff'")
+            .fetch_one(&app.db_pool)
+            .await
+            .expect("user should be persisted");
     assert_eq!("jeff", stored.0);
     assert_eq!("jeff@example.com", stored.1);
 }
@@ -112,7 +115,7 @@ async fn register_with_duplicate_username_conflicts() {
     let app = spawn_app().await;
     let first = app
         .api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("jeff", "jeff@example.com", "hunter2hunter2"))
         .send()
         .await
@@ -122,8 +125,12 @@ async fn register_with_duplicate_username_conflicts() {
     // Act — same username, different email
     let response = app
         .api_client
-        .post(&format!("{}/register", &app.address))
-        .form(&register_form("jeff", "other@example.com", "hunter2hunter2"))
+        .post(format!("{}/register", app.address))
+        .form(&register_form(
+            "jeff",
+            "other@example.com",
+            "hunter2hunter2",
+        ))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -142,7 +149,7 @@ async fn register_with_invalid_input_unprocesses() {
     // Act — bad username shape, bad email, short password
     let response = app
         .api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("Bad Name!", "nope", "short"))
         .send()
         .await
@@ -161,7 +168,7 @@ async fn login_sets_session_and_home_page_greets_logged_in_user() {
     // Arrange
     let app = spawn_app().await;
     app.api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("jeff", "jeff@example.com", "hunter2hunter2"))
         .send()
         .await
@@ -170,7 +177,7 @@ async fn login_sets_session_and_home_page_greets_logged_in_user() {
     // Act
     let response = app
         .api_client
-        .post(&format!("{}/login", &app.address))
+        .post(format!("{}/login", app.address))
         .form(&login_form("jeff", "hunter2hunter2"))
         .send()
         .await
@@ -178,7 +185,13 @@ async fn login_sets_session_and_home_page_greets_logged_in_user() {
 
     // Assert — login redirects home and sets a session cookie
     assert_eq!(303, response.status().as_u16());
-    assert_eq!(Some("/"), response.headers().get("Location").and_then(|v| v.to_str().ok()));
+    assert_eq!(
+        Some("/"),
+        response
+            .headers()
+            .get("Location")
+            .and_then(|v| v.to_str().ok())
+    );
     let cookie = response
         .headers()
         .get_all("Set-Cookie")
@@ -194,14 +207,16 @@ async fn login_sets_session_and_home_page_greets_logged_in_user() {
         .await
         .unwrap();
     assert_eq!(1, count, "the session record lives in Postgres");
-    let owner: Option<Uuid> =
-        sqlx::query_scalar("SELECT user_id FROM sessions LIMIT 1").fetch_one(&app.db_pool).await.unwrap();
+    let owner: Option<Uuid> = sqlx::query_scalar("SELECT user_id FROM sessions LIMIT 1")
+        .fetch_one(&app.db_pool)
+        .await
+        .unwrap();
     assert!(owner.is_some(), "the session row is tied to its user");
 
     // The home page greets the authenticated user (sees the logout button)
     let home = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .header("Cookie", cookie)
         .send()
         .await
@@ -219,7 +234,7 @@ async fn login_rejects_wrong_password_without_revealing_which_half_failed() {
     // Arrange
     let app = spawn_app().await;
     app.api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("jeff", "jeff@example.com", "hunter2hunter2"))
         .send()
         .await
@@ -228,7 +243,7 @@ async fn login_rejects_wrong_password_without_revealing_which_half_failed() {
     // Act
     let response = app
         .api_client
-        .post(&format!("{}/login", &app.address))
+        .post(format!("{}/login", app.address))
         .form(&login_form("jeff", "wrong-password"))
         .send()
         .await
@@ -245,14 +260,14 @@ async fn logout_destroys_the_server_side_session() {
     // Arrange — register + login, capture the cookie
     let app = spawn_app().await;
     app.api_client
-        .post(&format!("{}/register", &app.address))
+        .post(format!("{}/register", app.address))
         .form(&register_form("jeff", "jeff@example.com", "hunter2hunter2"))
         .send()
         .await
         .expect("registration should succeed");
     let login = app
         .api_client
-        .post(&format!("{}/login", &app.address))
+        .post(format!("{}/login", app.address))
         .form(&login_form("jeff", "hunter2hunter2"))
         .send()
         .await
@@ -268,7 +283,7 @@ async fn logout_destroys_the_server_side_session() {
     // Act — log out with the session cookie
     let response = app
         .api_client
-        .post(&format!("{}/logout", &app.address))
+        .post(format!("{}/logout", app.address))
         .header("Cookie", cookie.clone())
         .send()
         .await
@@ -285,14 +300,17 @@ async fn logout_destroys_the_server_side_session() {
     // The old cookie is dead: the home page no longer sees a logged-in user
     let home = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .header("Cookie", cookie)
         .send()
         .await
         .expect("Failed to execute request.");
     let body = home.text().await.unwrap();
     assert!(body.contains("Log in"), "a dead session is logged out");
-    assert!(!body.contains("Log out"), "no logout button for the dead session");
+    assert!(
+        !body.contains("Log out"),
+        "no logout button for the dead session"
+    );
 }
 
 #[tokio::test]
@@ -306,7 +324,7 @@ async fn login_is_rate_limited_per_identifier() {
     for _ in 0..6 {
         let response = app
             .api_client
-            .post(&format!("{}/login", &app.address))
+            .post(format!("{}/login", app.address))
             .form(&login_form("bruteforce", password))
             .send()
             .await
@@ -317,7 +335,7 @@ async fn login_is_rate_limited_per_identifier() {
     // Assert — the 7th attempt is denied with 429 + Retry-After
     let response = app
         .api_client
-        .post(&format!("{}/login", &app.address))
+        .post(format!("{}/login", app.address))
         .form(&login_form("bruteforce", password))
         .send()
         .await

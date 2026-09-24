@@ -1,22 +1,11 @@
 // tests/api/rotate.rs
 
-use crate::helpers::{register_and_login, spawn_app, upload_and_get_location};
-use image::DynamicImage;
+use crate::helpers::{register_and_login, spawn_app};
 use uuid::Uuid;
-use std::io::Cursor;
-
-fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
-    let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
-        image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
-    }));
-    let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Jpeg)
-        .unwrap();
-    buf
-}
 
 async fn upload(app: &crate::helpers::TestApp, cookie: &str) -> Uuid {
-    let location = crate::helpers::upload_and_get_location(app, cookie, "rotate me", 600, 400).await;
+    let location =
+        crate::helpers::upload_and_get_location(app, cookie, "rotate me", 600, 400).await;
     let post_id = location.trim_start_matches("/p/");
     sqlx::query_scalar("SELECT media_id FROM post_media WHERE post_id = $1")
         .bind(Uuid::parse_str(post_id).unwrap())
@@ -44,10 +33,7 @@ async fn owner_can_rotate_and_version_bumps() {
     // Act — alice (not the owner) tries to rotate: forbidden
     let forbidden = app
         .api_client
-        .post(&format!(
-            "{}/fragments/media/{media_id}/rotate",
-            &app.address
-        ))
+        .post(format!("{}/fragments/media/{media_id}/rotate", app.address))
         .header("Cookie", &alice)
         .header("Datastar-Request", "true")
         .send()
@@ -58,10 +44,7 @@ async fn owner_can_rotate_and_version_bumps() {
     // Act — the owner rotates 90° clockwise
     let rotated = app
         .api_client
-        .post(&format!(
-            "{}/fragments/media/{media_id}/rotate",
-            &app.address
-        ))
+        .post(format!("{}/fragments/media/{media_id}/rotate", app.address))
         .header("Cookie", &jeff)
         .header("Datastar-Request", "true")
         .send()
@@ -100,10 +83,7 @@ async fn unauthenticated_rotate_is_unauthorized() {
     // Act — no cookie at all
     let response = app
         .api_client
-        .post(&format!(
-            "{}/fragments/media/{media_id}/rotate",
-            &app.address
-        ))
+        .post(format!("{}/fragments/media/{media_id}/rotate", app.address))
         .header("Datastar-Request", "true")
         .send()
         .await

@@ -27,5 +27,7 @@ pub async fn not_found(
     };
 
     let body = templates.render("error.html", &serde_json::to_value(&context)?)?;
-    Ok(HttpResponse::NotFound().content_type("text/html").body(body))
+    Ok(HttpResponse::NotFound()
+        .content_type("text/html")
+        .body(body))
 }

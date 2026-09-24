@@ -1,10 +1,11 @@
 // src/routes/media_rotate.rs
 
 // dependencies
+use crate::database::DatabaseBackend;
 use crate::services::media;
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
-use actix_web::{Error, HttpResponse, Either, web};
+use actix_web::{Either, Error, HttpResponse, web};
 use datastar::actix::Sse;
 use datastar::prelude::{ElementPatchMode, PatchElements};
 use uuid::Uuid;
@@ -15,7 +16,7 @@ use uuid::Uuid;
 /// buster), and returns the re-rendered media block.
 pub async fn rotate_media(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     storage: web::Data<Box<dyn crate::storage::StorageBackend>>,
     path: web::Path<Uuid>,
     identity: Option<Identity>,
@@ -31,70 +32,52 @@ pub async fn rotate_media(
     };
     let media_id = path.into_inner();
 
-    let row: Option<(Uuid, String, i32, i32)> = sqlx::query_as(
-        "SELECT owner_id, storage_key, rotation, version FROM media WHERE id = $1",
-    )
-    .bind(media_id)
-    .fetch_optional(pool.get_ref())
-    .await
-    .map_err(crate::utils::e500)?;
+    let info = db
+        .media_for_rotation(media_id)
+        .await
+        .map_err(crate::utils::e500)?;
 
-    let Some((owner_id, storage_key, rotation, version)) = row else {
+    let Some(info) = info else {
         return Ok(Either::Left(HttpResponse::NotFound().finish()));
     };
-    if owner_id != user_id {
+    if info.owner_id != user_id {
         return Ok(Either::Left(HttpResponse::Forbidden().finish()));
     }
 
     // Re-derive from the stored original: EXIF orientation applies first,
     // then the cumulative manual rotation.
     let raw = storage
-        .find(&storage_key)
+        .find(&info.storage_key)
         .await
         .map_err(crate::utils::e500)?;
     let exif_orientation = media::exif_orientation(&raw);
     let (mut img, _mime) = media::decode_image(&raw).map_err(crate::utils::e500)?;
     img.apply_orientation(exif_orientation);
 
-    let new_rotation = (rotation + 90) % 360;
+    let new_rotation = (info.rotation + 90) % 360;
     img = media::rotate_cw(&img, (new_rotation as u32) / 90);
 
-    let derivatives =
-        media::store_derivatives(storage.get_ref().as_ref(), media_id, &img)
-            .await
-            .map_err(crate::utils::e500)?;
-    let new_version = version + 1;
+    let derivatives = media::store_derivatives(storage.get_ref().as_ref(), media_id, &img)
+        .await
+        .map_err(crate::utils::e500)?;
 
-    sqlx::query(
-        "UPDATE media SET rotation = $2, version = $3, width = $4, height = $5 WHERE id = $1",
+    // One store call bumps the version and persists the regenerated
+    // derivatives — dimensions, sizes, and storage keys — so the database
+    // stays the single source of truth for where the bytes live.
+    db.apply_rotation(
+        media_id,
+        new_rotation,
+        img.width(),
+        img.height(),
+        &derivatives,
     )
-    .bind(media_id)
-    .bind(new_rotation)
-    .bind(new_version)
-    .bind(img.width() as i32)
-    .bind(img.height() as i32)
-    .execute(pool.get_ref())
     .await
     .map_err(crate::utils::e500)?;
 
-    for derivative in &derivatives {
-        sqlx::query(
-            "UPDATE media_derivatives SET width = $3, height = $4, size_bytes = $5
-             WHERE media_id = $1 AND variant = $2",
-        )
-        .bind(media_id)
-        .bind(derivative.variant)
-        .bind(derivative.width as i32)
-        .bind(derivative.height as i32)
-        .bind(derivative.size_bytes)
-        .execute(pool.get_ref())
-        .await
-        .map_err(crate::utils::e500)?;
-    }
-
     // Re-render the media block (with the bumped version as cache buster)
     // and replace it in place via Datastar.
-    let page = crate::posts::load_post_media_block_for_media(pool.get_ref(), media_id)
+    let page = db
+        .load_media_block_for_media(media_id)
         .await
         .map_err(crate::utils::e500)?;
     let media = page.ok_or_else(|| crate::utils::e500("rotated media has no post"))?;

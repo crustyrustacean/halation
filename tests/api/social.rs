@@ -18,7 +18,7 @@ async fn follow_fragment_requires_auth() {
     // Act
     let response = app
         .api_client
-        .post(&follow_url(&app.address, "jeff"))
+        .post(follow_url(&app.address, "jeff"))
         .header(DATASTAR, "true")
         .send()
         .await
@@ -37,7 +37,7 @@ async fn follow_fragment_requires_datastar_header() {
     // Act — authenticated mutation without the Datastar header
     let response = app
         .api_client
-        .post(&follow_url(&app.address, "jeff"))
+        .post(follow_url(&app.address, "jeff"))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -56,7 +56,7 @@ async fn follow_unknown_user_is_404() {
     // Act
     let response = app
         .api_client
-        .post(&follow_url(&app.address, "nobody"))
+        .post(follow_url(&app.address, "nobody"))
         .header("Cookie", &cookie)
         .header(DATASTAR, "true")
         .send()
@@ -76,7 +76,7 @@ async fn self_follow_is_rejected() {
     // Act
     let response = app
         .api_client
-        .post(&follow_url(&app.address, "jeff"))
+        .post(follow_url(&app.address, "jeff"))
         .header("Cookie", &cookie)
         .header(DATASTAR, "true")
         .send()
@@ -91,13 +91,13 @@ async fn self_follow_is_rejected() {
 async fn follow_unfollow_round_trip() {
     // Arrange
     let app = spawn_app().await;
-    let jeff = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
+    let _jeff = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
     let alice = register_and_login(&app, "alice", "alice@example.com", "wonderland1").await;
 
     // Act — alice follows jeff
     let response = app
         .api_client
-        .post(&follow_url(&app.address, "jeff"))
+        .post(follow_url(&app.address, "jeff"))
         .header("Cookie", &alice)
         .header(DATASTAR, "true")
         .send()
@@ -133,7 +133,7 @@ async fn follow_unfollow_round_trip() {
     // Jeff's profile shows the follower count and alice's Following state
     let profile = app
         .api_client
-        .get(&format!("{}/u/jeff", &app.address))
+        .get(format!("{}/u/jeff", app.address))
         .header("Cookie", &alice)
         .send()
         .await
@@ -145,7 +145,7 @@ async fn follow_unfollow_round_trip() {
     // Act — unfollow
     let response = app
         .api_client
-        .delete(&follow_url(&app.address, "jeff"))
+        .delete(follow_url(&app.address, "jeff"))
         .header("Cookie", &alice)
         .header(DATASTAR, "true")
         .send()
@@ -172,13 +172,13 @@ async fn duplicate_follow_is_idempotent() {
     // Arrange
     let app = spawn_app().await;
     let alice = register_and_login(&app, "alice", "alice@example.com", "wonderland1").await;
-    let jeff = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
+    let _jeff = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
 
     // Act — follow twice
     for _ in 0..2 {
         let response = app
             .api_client
-            .post(&follow_url(&app.address, "jeff"))
+            .post(follow_url(&app.address, "jeff"))
             .header("Cookie", &alice)
             .header(DATASTAR, "true")
             .send()
@@ -208,7 +208,7 @@ async fn follower_and_following_lists_render() {
 
     for follower in [&alice, &bob] {
         app.api_client
-            .post(&follow_url(&app.address, "jeff"))
+            .post(follow_url(&app.address, "jeff"))
             .header("Cookie", follower)
             .header(DATASTAR, "true")
             .send()
@@ -216,7 +216,7 @@ async fn follower_and_following_lists_render() {
             .unwrap();
     }
     app.api_client
-        .post(&follow_url(&app.address, "alice"))
+        .post(follow_url(&app.address, "alice"))
         .header("Cookie", &jeff)
         .header(DATASTAR, "true")
         .send()
@@ -226,7 +226,7 @@ async fn follower_and_following_lists_render() {
     // Act — jeff's followers page
     let followers = app
         .api_client
-        .get(&format!("{}/u/jeff/followers", &app.address))
+        .get(format!("{}/u/jeff/followers", app.address))
         .send()
         .await
         .unwrap();
@@ -240,7 +240,7 @@ async fn follower_and_following_lists_render() {
     // Act — jeff's following page
     let following = app
         .api_client
-        .get(&format!("{}/u/jeff/following", &app.address))
+        .get(format!("{}/u/jeff/following", app.address))
         .send()
         .await
         .unwrap();
@@ -254,7 +254,7 @@ async fn follower_and_following_lists_render() {
     // Unknown account → styled 404
     let missing = app
         .api_client
-        .get(&format!("{}/u/nobody/followers", &app.address))
+        .get(format!("{}/u/nobody/followers", app.address))
         .send()
         .await
         .unwrap();

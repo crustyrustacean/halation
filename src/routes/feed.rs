@@ -1,14 +1,14 @@
 // src/routes/feed.rs
 
 // dependencies
-use crate::posts::{self, PostCard, FEED_PAGE_SIZE};
+use crate::database::DatabaseBackend;
+use crate::posts::{FEED_PAGE_SIZE, PostCard};
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
 use actix_web::{Error, HttpResponse, web};
 use datastar::actix::Sse;
 use datastar::prelude::{ElementPatchMode, PatchElements};
 use serde::Deserialize;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -28,7 +28,10 @@ fn render_cards(templates: &dyn TemplateRenderer, cards: &[PostCard]) -> Result<
     Ok(html)
 }
 
-fn load_more_button(templates: &dyn TemplateRenderer, before: Option<String>) -> Result<String, Error> {
+fn load_more_button(
+    templates: &dyn TemplateRenderer,
+    before: Option<String>,
+) -> Result<String, Error> {
     let context = serde_json::json!({
         "load_more_before": before.map(|id| id.to_string()),
     });
@@ -37,13 +40,14 @@ fn load_more_button(templates: &dyn TemplateRenderer, before: Option<String>) ->
 
 async fn render_feed_page(
     templates: &dyn TemplateRenderer,
-    pool: &PgPool,
+    db: &dyn DatabaseBackend,
     before: Option<Uuid>,
     identity: Option<Identity>,
     title: &'static str,
     heading: &str,
 ) -> Result<HttpResponse, Error> {
-    let (cards, has_more) = posts::load_recent_page(pool, before, FEED_PAGE_SIZE)
+    let (cards, has_more) = db
+        .load_recent_page(before, FEED_PAGE_SIZE)
         .await
         .map_err(crate::utils::e500)?;
     let load_more_before = if has_more {
@@ -69,14 +73,14 @@ async fn render_feed_page(
 /// serves the global timeline; Phase 5 switches it to following-only.
 pub async fn get_feed(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     query: web::Query<FeedQuery>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
     render_feed_page(
         templates.get_ref().as_ref(),
-        pool.get_ref(),
+        db.get_ref().as_ref(),
         before,
         identity,
         "Feed",
@@ -89,14 +93,14 @@ pub async fn get_feed(
 /// newest first, no ranking, no surprises.
 pub async fn get_recent(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     query: web::Query<FeedQuery>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
     render_feed_page(
         templates.get_ref().as_ref(),
-        pool.get_ref(),
+        db.get_ref().as_ref(),
         before,
         identity,
         "Recent",
@@ -108,12 +112,13 @@ pub async fn get_recent(
 /// GET /hashtags/{tag} — posts carrying the tag.
 pub async fn get_hashtag_feed(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let tag = path.into_inner().to_lowercase();
-    let (cards, _has_more) = posts::load_tag_page(pool.get_ref(), &tag, None, FEED_PAGE_SIZE)
+    let (cards, _has_more) = db
+        .load_tag_page(&tag, None, FEED_PAGE_SIZE)
         .await
         .map_err(crate::utils::e500)?;
 
@@ -136,19 +141,22 @@ pub async fn get_hashtag_feed(
 /// the next cursor — or removed once the feed is exhausted.
 pub async fn feed_fragment(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     query: web::Query<FeedQuery>,
 ) -> Result<Sse, Error> {
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-    let (cards, has_more) = posts::load_recent_page(pool.get_ref(), before, FEED_PAGE_SIZE)
+    let (cards, has_more) = db
+        .load_recent_page(before, FEED_PAGE_SIZE)
         .await
         .map_err(crate::utils::e500)?;
 
     let cards_html = render_cards(templates.get_ref().as_ref(), &cards)?;
-    let mut events = vec![PatchElements::new(cards_html)
-        .selector("#load-more")
-        .mode(ElementPatchMode::Before)
-        .into_datastar_event()];
+    let mut events = vec![
+        PatchElements::new(cards_html)
+            .selector("#load-more")
+            .mode(ElementPatchMode::Before)
+            .into_datastar_event(),
+    ];
 
     if has_more {
         let next_cursor = cards.last().map(|card| card.id.to_string());

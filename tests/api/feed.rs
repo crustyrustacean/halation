@@ -2,8 +2,8 @@
 
 use crate::helpers::{register_and_login, spawn_app};
 use image::DynamicImage;
-use uuid::Uuid;
 use std::io::Cursor;
+use uuid::Uuid;
 
 /// Generate a real JPEG of the given dimensions.
 fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
@@ -17,14 +17,20 @@ fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
 }
 
 /// Upload one photo as the cookie's user; returns the permalink path.
-async fn upload_photo(app: &crate::helpers::TestApp, cookie: &str, caption: &str, w: u32, h: u32) -> String {
+async fn upload_photo(
+    app: &crate::helpers::TestApp,
+    cookie: &str,
+    caption: &str,
+    w: u32,
+    h: u32,
+) -> String {
     let part = reqwest::multipart::Part::bytes(test_jpeg(w, h))
         .file_name("photo.jpg")
         .mime_str("image/jpeg")
         .unwrap();
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -56,7 +62,7 @@ async fn feed_page_shows_posts_newest_first() {
     // Act — anonymous visitor sees the global timeline
     let response = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -64,13 +70,17 @@ async fn feed_page_shows_posts_newest_first() {
     // Assert — newest first
     assert_eq!(200, response.status().as_u16());
     let body = response.text().await.unwrap();
-    let alice_pos = body.find("second post by alice").expect("alice's post on feed");
-    let jeff_pos = body.find("first post by jeff").expect("jeff's post on feed");
+    let alice_pos = body
+        .find("second post by alice")
+        .expect("alice's post on feed");
+    let jeff_pos = body
+        .find("first post by jeff")
+        .expect("jeff's post on feed");
     assert!(
         alice_pos < jeff_pos,
         "newest post (alice) must appear above older post (jeff)"
     );
-    assert!(body.contains("alice@example") == false, "no emails on public pages");
+    assert!(!body.contains("alice@example"), "no emails on public pages");
 }
 
 #[tokio::test]
@@ -83,7 +93,7 @@ async fn recent_page_shows_the_same_timeline() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/recent", &app.address))
+        .get(format!("{}/recent", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -106,7 +116,7 @@ async fn load_more_fragment_paginates_and_exhausts() {
     // Act — first fragment page
     let first = app
         .api_client
-        .get(&format!("{}/fragments/feed", &app.address))
+        .get(format!("{}/fragments/feed", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -115,7 +125,11 @@ async fn load_more_fragment_paginates_and_exhausts() {
     assert_eq!(200, first.status().as_u16());
     assert_eq!(
         "text/event-stream",
-        first.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap()
+        first
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
     );
     let body = first.text().await.unwrap();
     assert_eq!(
@@ -123,10 +137,19 @@ async fn load_more_fragment_paginates_and_exhausts() {
         body.matches("event: datastar-patch-elements").count(),
         "cards patch + button patch"
     );
-    assert!(body.contains("mode before"), "cards insert before the button");
-    assert!(body.contains("mode replace"), "button is refreshed in place");
+    assert!(
+        body.contains("mode before"),
+        "cards insert before the button"
+    );
+    assert!(
+        body.contains("mode replace"),
+        "button is refreshed in place"
+    );
     assert!(body.contains("caption number 11"), "newest card present");
-    assert!(!body.contains("caption number 0"), "oldest card is on page 2");
+    assert!(
+        !body.contains("caption number 0"),
+        "oldest card is on page 2"
+    );
 
     // The next cursor is the 10th-newest post
     let tenth: Uuid = sqlx::query_scalar(
@@ -139,10 +162,7 @@ async fn load_more_fragment_paginates_and_exhausts() {
     // Act — second page with the cursor
     let second = app
         .api_client
-        .get(&format!(
-            "{}/fragments/feed?before={tenth}",
-            &app.address
-        ))
+        .get(format!("{}/fragments/feed?before={tenth}", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -151,7 +171,10 @@ async fn load_more_fragment_paginates_and_exhausts() {
     assert_eq!(200, second.status().as_u16());
     let body = second.text().await.unwrap();
     assert!(body.contains("caption number 0"));
-    assert!(body.contains("mode remove"), "exhausted feed removes the button");
+    assert!(
+        body.contains("mode remove"),
+        "exhausted feed removes the button"
+    );
 }
 
 #[tokio::test]
@@ -168,7 +191,7 @@ async fn location_chip_renders_on_the_feed() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -197,7 +220,7 @@ async fn hashtag_flow_from_caption_to_tag_page() {
     // Act — feed renders tag links
     let feed = app
         .api_client
-        .get(&format!("{}/", &app.address))
+        .get(format!("{}/", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -211,7 +234,7 @@ async fn hashtag_flow_from_caption_to_tag_page() {
     // Act — the tag page carries the post
     let tag_page = app
         .api_client
-        .get(&format!("{}/hashtags/goldenhour", &app.address))
+        .get(format!("{}/hashtags/goldenhour", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -222,7 +245,7 @@ async fn hashtag_flow_from_caption_to_tag_page() {
     // An unused tag page renders empty, not 404
     let empty = app
         .api_client
-        .get(&format!("{}/hashtags/nobodyusedthis", &app.address))
+        .get(format!("{}/hashtags/nobodyusedthis", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -242,7 +265,7 @@ async fn profile_page_renders_grid_and_counts() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/u/jeff", &app.address))
+        .get(format!("{}/u/jeff", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -265,7 +288,7 @@ async fn profile_page_renders_grid_and_counts() {
     // Unknown account → styled 404
     let missing = app
         .api_client
-        .get(&format!("{}/u/nobody", &app.address))
+        .get(format!("{}/u/nobody", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -283,7 +306,7 @@ async fn permalink_shows_the_exif_meta_row() {
         .mime_str("image/jpeg");
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -303,7 +326,7 @@ async fn permalink_shows_the_exif_meta_row() {
     // Act
     let page = app
         .api_client
-        .get(&format!("{}{}", &app.address, location))
+        .get(format!("{}{}", app.address, location))
         .header("Cookie", &cookie)
         .send()
         .await

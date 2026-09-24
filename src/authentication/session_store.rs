@@ -58,8 +58,10 @@ impl SessionStore for PostgresSessionStore {
                     return Ok(None);
                 }
 
-                let state = serde_json::from_str::<HashMap<String, String>>(&state_json)
-                    .map_err(|e| LoadError::Deserialization(anyhow!("Invalid session state: {e}")))?;
+                let state =
+                    serde_json::from_str::<HashMap<String, String>>(&state_json).map_err(|e| {
+                        LoadError::Deserialization(anyhow!("Invalid session state: {e}"))
+                    })?;
                 Ok(Some(state))
             }
         }

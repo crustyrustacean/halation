@@ -3,8 +3,8 @@
 use crate::helpers::spawn_app;
 use actix_session::storage::{SessionKey, SessionStore};
 use halation::authentication::PostgresSessionStore;
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn session_store_round_trips_through_postgres() {
@@ -48,14 +48,17 @@ async fn session_store_round_trips_through_postgres() {
             .fetch_one(&app.db_pool)
             .await
             .expect("row should exist");
-    assert_eq!(Some(user_id), persisted.0, "user_id is lifted into its column");
+    assert_eq!(
+        Some(user_id),
+        persisted.0,
+        "user_id is lifted into its column"
+    );
     assert!(persisted.1.is_some(), "the ttl became an expiry timestamp");
 
     // SessionKey is neither Clone nor Copy — hold the string, rebuild keys.
     let key_string = key.as_ref().to_string();
-    let rebuild = |s: &str| {
-        SessionKey::try_from(s.to_string()).expect("round-tripped key is still valid")
-    };
+    let rebuild =
+        |s: &str| SessionKey::try_from(s.to_string()).expect("round-tripped key is still valid");
 
     // Act — update changes the state in place
     let mut updated = state.clone();
@@ -93,8 +96,7 @@ async fn expired_sessions_are_swept_on_load() {
     let app = spawn_app().await;
     let store = PostgresSessionStore::new(app.db_pool.clone());
 
-    let state: HashMap<String, String> =
-        HashMap::from([("k".to_string(), "v".to_string())]);
+    let state: HashMap<String, String> = HashMap::from([("k".to_string(), "v".to_string())]);
     let negative_ttl = actix_web::cookie::time::Duration::seconds(-1);
 
     // Act — save with an already-elapsed ttl, then load

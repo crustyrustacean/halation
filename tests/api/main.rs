@@ -3,11 +3,11 @@
 mod auth;
 mod bootstrap;
 mod deep_health;
-mod health_check;
 mod feed;
+mod health_check;
 mod helpers;
 mod pages;
 mod rotate;
-mod social;
 mod session_store;
+mod social;
 mod upload;

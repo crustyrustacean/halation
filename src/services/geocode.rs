@@ -68,9 +68,10 @@ pub fn parse_nominatim_location(json: &Value) -> Option<String> {
         "county",
     ] {
         if let Some(name) = address.get(key).and_then(|v| v.as_str())
-            && !name.is_empty() {
-                return Some(name.to_string());
-            }
+            && !name.is_empty()
+        {
+            return Some(name.to_string());
+        }
     }
     None
 }
@@ -108,7 +109,10 @@ mod tests {
         let json = json!({ "address": { "city": "Port Townsend", "state": "Washington" } });
 
         // Act / Assert
-        assert_eq!(parse_nominatim_location(&json).as_deref(), Some("Port Townsend"));
+        assert_eq!(
+            parse_nominatim_location(&json).as_deref(),
+            Some("Port Townsend")
+        );
     }
 
     #[test]

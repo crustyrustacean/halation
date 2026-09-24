@@ -18,7 +18,8 @@ async fn build_bootstraps_a_missing_database() {
     let application = Application::build(configuration.clone())
         .await
         .expect("build should create and migrate a missing database");
-    let _ = tokio::spawn(application.run_until_stopped());
+    // Spawn and detach: the JoinHandle is dropped, the server keeps running.
+    tokio::spawn(application.run_until_stopped());
 
     // Assert — every shipped table exists in the freshly bootstrapped DB
     let pool = get_connection_pool(&configuration.database);

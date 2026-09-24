@@ -52,21 +52,20 @@ pub async fn spawn_app() -> TestApp {
         .await
         .expect("Failed to build application.");
     let application_port = application.port();
-    let _ = tokio::spawn(application.run_until_stopped());
+    // Spawn and detach: the JoinHandle is dropped, the server keeps running.
+    tokio::spawn(application.run_until_stopped());
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
 
-    let test_app = TestApp {
+    TestApp {
         address: format!("http://localhost:{}", application_port),
         port: application_port,
         db_pool: get_connection_pool(&configuration.database),
         api_client: client,
-    };
-
-    test_app
+    }
 }
 
 /// Upload one photo as the cookie's user; returns the permalink path.
@@ -81,8 +80,11 @@ pub async fn upload_and_get_location(
         image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
     }));
     let mut bytes = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
-        .unwrap();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Jpeg,
+    )
+    .unwrap();
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name("photo.jpg")
         .mime_str("image/jpeg")
@@ -90,7 +92,7 @@ pub async fn upload_and_get_location(
 
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -117,15 +119,19 @@ pub async fn register_and_login(
     password: &str,
 ) -> String {
     app.api_client
-        .post(&format!("{}/register", &app.address))
-        .form(&[("username", username), ("email", email), ("password", password)])
+        .post(format!("{}/register", app.address))
+        .form(&[
+            ("username", username),
+            ("email", email),
+            ("password", password),
+        ])
         .send()
         .await
         .expect("registration should succeed");
 
     let login = app
         .api_client
-        .post(&format!("{}/login", &app.address))
+        .post(format!("{}/login", app.address))
         .form(&[("identifier", username), ("password", password)])
         .send()
         .await

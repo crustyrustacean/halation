@@ -1,7 +1,7 @@
 // src/routes/upload.rs
 
 // dependencies
-use crate::posts;
+use crate::database::DatabaseBackend;
 use crate::services::geocode::Geocoder;
 use crate::services::media::{self, MediaError};
 use crate::template::TemplateRenderer;
@@ -54,7 +54,7 @@ pub async fn get_upload_page(
 pub async fn post_upload(
     MultipartForm(form): MultipartForm<UploadForm>,
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     storage: web::Data<Box<dyn crate::storage::StorageBackend>>,
     geocoder: web::Data<Geocoder>,
     identity: Option<Identity>,
@@ -75,9 +75,11 @@ pub async fn post_upload(
             "sub_header": "New photo post.", "logged_in": true,
             "errors": errors,
         });
-        Ok::<_, Error>(HttpResponse::build(status)
-            .content_type("text/html")
-            .body(templates.render("upload.html", &context)?))
+        Ok::<_, Error>(
+            HttpResponse::build(status)
+                .content_type("text/html")
+                .body(templates.render("upload.html", &context)?),
+        )
     };
 
     if form.files.is_empty() {
@@ -103,20 +105,17 @@ pub async fn post_upload(
         .await;
     }
 
-    // Pipeline: process each file, then persist media rows + the post in a
-    // single transaction so a half-uploaded post can never exist.
-    let mut tx = pool.begin().await.map_err(crate::utils::e500)?;
-
-    let post_id = posts::create_post(&mut tx, user_id, &caption)
-        .await
-        .map_err(crate::utils::e500)?;
-
+    // Pipeline: process every file first (decode + store), then persist
+    // the whole post — media rows, derivative rows, post links, hashtags,
+    // location — in one store-side transaction, so a half-uploaded post
+    // can never exist and no DB connection is held across image work.
+    let mut stored_media: Vec<media::StoredMedia> = Vec::with_capacity(form.files.len());
     for (position, file) in form.files.iter().enumerate() {
         let raw = std::fs::read(file.file.path())
             .map_err(|e| crate::utils::e500(format!("temp file vanished: {e}")))?;
 
-        let stored = match media::process_and_store(storage.get_ref().as_ref(), &raw).await {
-            Ok(stored) => stored,
+        match media::process_and_store(storage.get_ref().as_ref(), &raw).await {
+            Ok(stored) => stored_media.push(stored),
             Err(MediaError::InvalidImage) => {
                 return render_error(
                     actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
@@ -128,21 +127,7 @@ pub async fn post_upload(
                 .await;
             }
             Err(e) => return Err(crate::utils::e500(e)),
-        };
-
-        let media_id = media::insert_media(&mut tx, user_id, &stored, None)
-            .await
-            .map_err(crate::utils::e500)?;
-
-        sqlx::query(
-            "INSERT INTO post_media (post_id, media_id, position) VALUES ($1, $2, $3)",
-        )
-        .bind(post_id)
-        .bind(media_id)
-        .bind(position as i32)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::utils::e500)?;
+        }
     }
 
     // GPS -> location name: best-effort reverse geocode of the first
@@ -152,24 +137,25 @@ pub async fn post_upload(
         for file in form.files.iter() {
             let raw = std::fs::read(file.file.path()).unwrap_or_default();
             let exif = media::extract_exif(&raw);
-            let lat = exif.as_ref().and_then(|e| e.get("gps_latitude")).and_then(|v| v.as_f64());
-            let lng = exif.as_ref().and_then(|e| e.get("gps_longitude")).and_then(|v| v.as_f64());
+            let lat = exif
+                .as_ref()
+                .and_then(|e| e.get("gps_latitude"))
+                .and_then(|v| v.as_f64());
+            let lng = exif
+                .as_ref()
+                .and_then(|e| e.get("gps_longitude"))
+                .and_then(|v| v.as_f64());
             if let (Some(lat), Some(lng)) = (lat, lng) {
                 location_name = geocoder.reverse(lat, lng).await;
                 break;
             }
         }
     }
-    if let Some(name) = &location_name {
-        sqlx::query("UPDATE posts SET location_name = $2 WHERE id = $1")
-            .bind(post_id)
-            .bind(name)
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::utils::e500)?;
-    }
 
-    tx.commit().await.map_err(crate::utils::e500)?;
+    let post_id = db
+        .create_post_with_media(user_id, &caption, location_name, &stored_media)
+        .await
+        .map_err(crate::utils::e500)?;
 
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", format!("/p/{post_id}")))
@@ -177,17 +163,21 @@ pub async fn post_upload(
 }
 
 /// GET /p/{post_id} — the post permalink: photo set + caption + owner +
-/// EXIF meta row (loaded via `posts::load_post_page`).
+/// EXIF meta row (loaded via `DatabaseBackend::load_post_page`).
 pub async fn get_post_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<Uuid>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let post_id = path.into_inner();
-    let viewer_id = identity.as_ref().and_then(|i| i.id().ok()).and_then(|s| Uuid::parse_str(&s).ok());
+    let viewer_id = identity
+        .as_ref()
+        .and_then(|i| i.id().ok())
+        .and_then(|s| Uuid::parse_str(&s).ok());
 
-    match crate::posts::load_post_page(pool.get_ref(), post_id)
+    match db
+        .load_post_page(post_id)
         .await
         .map_err(crate::utils::e500)?
     {
@@ -210,7 +200,9 @@ pub async fn get_post_page(
                 "logged_in": identity.is_some(),
             });
             let body = templates.render("error.html", &context)?;
-            Ok(HttpResponse::NotFound().content_type("text/html").body(body))
+            Ok(HttpResponse::NotFound()
+                .content_type("text/html")
+                .body(body))
         }
     }
 }

@@ -1,13 +1,12 @@
 // src/routes/social.rs
 
 // dependencies
-use crate::follows;
+use crate::database::DatabaseBackend;
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
-use actix_web::{Error, HttpResponse, Either, web};
+use actix_web::{Either, Error, HttpResponse, web};
 use datastar::actix::Sse;
 use datastar::prelude::{ElementPatchMode, PatchElements};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 fn viewer_id(identity: Option<&Identity>) -> Result<Option<Uuid>, Error> {
@@ -44,7 +43,7 @@ fn button_swap(html: String) -> Sse {
 /// POST /fragments/users/{username}/follow — follow the account.
 pub async fn follow_user(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<Either<HttpResponse, Sse>, Error> {
@@ -53,7 +52,8 @@ pub async fn follow_user(
     };
     let username = path.into_inner();
 
-    let Some(target) = follows::find_user_id_by_username(pool.get_ref(), &username)
+    let Some(target) = db
+        .find_user_id_by_username(&username)
         .await
         .map_err(crate::utils::e500)?
     else {
@@ -65,7 +65,7 @@ pub async fn follow_user(
         ));
     }
 
-    follows::follow(pool.get_ref(), viewer, target)
+    db.follow(viewer, target)
         .await
         .map_err(crate::utils::e500)?;
 
@@ -76,7 +76,7 @@ pub async fn follow_user(
 /// DELETE /fragments/users/{username}/follow — unfollow the account.
 pub async fn unfollow_user(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<Either<HttpResponse, Sse>, Error> {
@@ -85,14 +85,15 @@ pub async fn unfollow_user(
     };
     let username = path.into_inner();
 
-    let Some(target) = follows::find_user_id_by_username(pool.get_ref(), &username)
+    let Some(target) = db
+        .find_user_id_by_username(&username)
         .await
         .map_err(crate::utils::e500)?
     else {
         return Ok(Either::Left(HttpResponse::NotFound().finish()));
     };
 
-    follows::unfollow(pool.get_ref(), viewer, target)
+    db.unfollow(viewer, target)
         .await
         .map_err(crate::utils::e500)?;
 
@@ -102,13 +103,14 @@ pub async fn unfollow_user(
 
 async fn render_social_list(
     templates: &dyn TemplateRenderer,
-    pool: &PgPool,
+    db: &dyn DatabaseBackend,
     username: &str,
     kind: &str,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     // Unknown account → styled 404
-    if follows::find_user_id_by_username(pool, username)
+    if db
+        .find_user_id_by_username(username)
         .await
         .map_err(crate::utils::e500)?
         .is_none()
@@ -120,16 +122,22 @@ async fn render_social_list(
             "logged_in": identity.is_some(),
         });
         let body = templates.render("error.html", &context)?;
-        return Ok(HttpResponse::NotFound().content_type("text/html").body(body));
+        return Ok(HttpResponse::NotFound()
+            .content_type("text/html")
+            .body(body));
     }
 
     let accounts = match kind {
-        "followers" => follows::followers_of(pool, username).await,
-        _ => follows::following_of(pool, username).await,
+        "followers" => db.followers_of(username).await,
+        _ => db.following_of(username).await,
     }
     .map_err(crate::utils::e500)?;
 
-    let label = if kind == "followers" { "Followers" } else { "Following" };
+    let label = if kind == "followers" {
+        "Followers"
+    } else {
+        "Following"
+    };
     let context = serde_json::json!({
         "title": format!("{label} — @{username}"),
         "heading": format!("{label} — @{username}"),
@@ -144,21 +152,35 @@ async fn render_social_list(
 /// GET /u/{username}/followers
 pub async fn get_followers_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
-    render_social_list(templates.get_ref().as_ref(), pool.get_ref(), &username, "followers", identity).await
+    render_social_list(
+        templates.get_ref().as_ref(),
+        db.get_ref().as_ref(),
+        &username,
+        "followers",
+        identity,
+    )
+    .await
 }
 
 /// GET /u/{username}/following
 pub async fn get_following_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
-    pool: web::Data<PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
-    render_social_list(templates.get_ref().as_ref(), pool.get_ref(), &username, "following", identity).await
+    render_social_list(
+        templates.get_ref().as_ref(),
+        db.get_ref().as_ref(),
+        &username,
+        "following",
+        identity,
+    )
+    .await
 }

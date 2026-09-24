@@ -135,80 +135,6 @@ impl DatabaseSettings {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The env source turns `APP_STORAGE__R2__BUCKET` into the nested path
-    /// `storage.r2.bucket` — StorageSettings must deserialize that shape,
-    /// or the S3 backend boots with an empty bucket ("The bucket is
-    /// misconfigured", OpenDAL ConfigInvalid).
-    #[test]
-    fn nested_r2_environment_maps_into_storage_settings() {
-        // Arrange — the same nested shape the config crate's env source
-        // produces for APP_STORAGE__R2__{BUCKET,ENDPOINT,ACCESS_KEY,SECRET_KEY}
-        let nested = serde_json::json!({
-            "application": {
-                "port": 8000,
-                "host": "127.0.0.1",
-                "base_url": "http://127.0.0.1:8000"
-            },
-            "database": {
-                "host": "127.0.0.1",
-                "port": 5433,
-                "username": "postgres",
-                "password": "password",
-                "database_name": "halation",
-                "require_ssl": false
-            },
-            "storage": {
-                "backend": "s3",
-                "r2": {
-                    "bucket": "halation-media",
-                    "endpoint": "https://abc123.r2.cloudflarestorage.com",
-                    "access_key": "access",
-                    "secret_key": "secret"
-                }
-            },
-            "email": { "backend": "noop" },
-            "secrets": { "session_signing_key": "test-key" }
-        });
-
-        // Act
-        let settings: Settings = serde_json::from_value(nested).expect("should deserialize");
-
-        // Assert
-        assert_eq!("s3", settings.storage.backend);
-        assert_eq!("halation-media", settings.storage.r2.bucket);
-        assert_eq!("https://abc123.r2.cloudflarestorage.com", settings.storage.r2.endpoint);
-        assert_eq!("access", settings.storage.r2.access_key.expose_secret());
-        assert_eq!("secret", settings.storage.r2.secret_key.expose_secret());
-    }
-
-    /// Defaults hold when the nested r2 section is absent entirely.
-    #[test]
-    fn storage_defaults_without_r2_section() {
-        // Arrange
-        let minimal = serde_json::json!({
-            "application": {
-                "port": 8000, "host": "127.0.0.1", "base_url": "http://127.0.0.1:8000"
-            },
-            "database": {
-                "host": "127.0.0.1", "port": 5433, "username": "postgres",
-                "password": "password", "database_name": "halation", "require_ssl": false
-            }
-        });
-
-        // Act
-        let settings: Settings = serde_json::from_value(minimal).expect("should deserialize");
-
-        // Assert — memory backend, empty r2 credentials
-        assert_eq!("memory", settings.storage.backend);
-        assert_eq!("", settings.storage.r2.bucket);
-        assert_eq!("", settings.storage.r2.access_key.expose_secret());
-    }
-}
-
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {
     let base_path = std::env::current_dir().expect("Failed to determine the current directory");
     let configuration_directory = base_path.join("configuration");
@@ -266,5 +192,82 @@ impl TryFrom<String> for Environment {
                 other
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The env source turns `APP_STORAGE__R2__BUCKET` into the nested path
+    /// `storage.r2.bucket` — StorageSettings must deserialize that shape,
+    /// or the S3 backend boots with an empty bucket ("The bucket is
+    /// misconfigured", OpenDAL ConfigInvalid).
+    #[test]
+    fn nested_r2_environment_maps_into_storage_settings() {
+        // Arrange — the same nested shape the config crate's env source
+        // produces for APP_STORAGE__R2__{BUCKET,ENDPOINT,ACCESS_KEY,SECRET_KEY}
+        let nested = serde_json::json!({
+            "application": {
+                "port": 8000,
+                "host": "127.0.0.1",
+                "base_url": "http://127.0.0.1:8000"
+            },
+            "database": {
+                "host": "127.0.0.1",
+                "port": 5433,
+                "username": "postgres",
+                "password": "password",
+                "database_name": "halation",
+                "require_ssl": false
+            },
+            "storage": {
+                "backend": "s3",
+                "r2": {
+                    "bucket": "halation-media",
+                    "endpoint": "https://abc123.r2.cloudflarestorage.com",
+                    "access_key": "access",
+                    "secret_key": "secret"
+                }
+            },
+            "email": { "backend": "noop" },
+            "secrets": { "session_signing_key": "test-key" }
+        });
+
+        // Act
+        let settings: Settings = serde_json::from_value(nested).expect("should deserialize");
+
+        // Assert
+        assert_eq!("s3", settings.storage.backend);
+        assert_eq!("halation-media", settings.storage.r2.bucket);
+        assert_eq!(
+            "https://abc123.r2.cloudflarestorage.com",
+            settings.storage.r2.endpoint
+        );
+        assert_eq!("access", settings.storage.r2.access_key.expose_secret());
+        assert_eq!("secret", settings.storage.r2.secret_key.expose_secret());
+    }
+
+    /// Defaults hold when the nested r2 section is absent entirely.
+    #[test]
+    fn storage_defaults_without_r2_section() {
+        // Arrange
+        let minimal = serde_json::json!({
+            "application": {
+                "port": 8000, "host": "127.0.0.1", "base_url": "http://127.0.0.1:8000"
+            },
+            "database": {
+                "host": "127.0.0.1", "port": 5433, "username": "postgres",
+                "password": "password", "database_name": "halation", "require_ssl": false
+            }
+        });
+
+        // Act
+        let settings: Settings = serde_json::from_value(minimal).expect("should deserialize");
+
+        // Assert — memory backend, empty r2 credentials
+        assert_eq!("memory", settings.storage.backend);
+        assert_eq!("", settings.storage.r2.bucket);
+        assert_eq!("", settings.storage.r2.access_key.expose_secret());
     }
 }

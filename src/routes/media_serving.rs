@@ -1,6 +1,7 @@
 // src/routes/media_serving.rs
 
 // dependencies
+use crate::database::DatabaseBackend;
 use crate::storage::StorageBackend;
 use actix_web::{HttpRequest, HttpResponse, http::header, web};
 use uuid::Uuid;
@@ -14,7 +15,7 @@ const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// (it carries EXIF, including GPS). Long immutable cache headers: keys
 /// are content-addressed by media id + variant, so they never change.
 pub async fn get_media_derivative(
-    pool: web::Data<sqlx::PgPool>,
+    db: web::Data<Box<dyn DatabaseBackend>>,
     storage: web::Data<Box<dyn StorageBackend>>,
     path: web::Path<(Uuid, String)>,
     _req: HttpRequest,
@@ -25,18 +26,10 @@ pub async fn get_media_derivative(
         return HttpResponse::NotFound().finish();
     }
 
-    let storage_key: Option<String> = sqlx::query_scalar(
-        "SELECT storage_key FROM media_derivatives WHERE media_id = $1 AND variant = $2",
-    )
-    .bind(media_id)
-    .bind(&variant)
-    .fetch_optional(pool.get_ref())
-    .await
-    .ok()
-    .flatten();
-
-    let Some(storage_key) = storage_key else {
-        return HttpResponse::NotFound().finish();
+    let storage_key = match db.find_derivative_key(media_id, &variant).await {
+        Ok(Some(key)) => key,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(_) => return HttpResponse::InternalServerError().finish(),
     };
 
     match storage.find(&storage_key).await {

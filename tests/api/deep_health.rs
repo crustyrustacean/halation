@@ -12,7 +12,7 @@ async fn deep_health_reports_all_dependencies_ok() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/api/v1/health", &app.address))
+        .get(format!("{}/api/v1/health", app.address))
         .send()
         .await
         .expect("Failed to execute request.");

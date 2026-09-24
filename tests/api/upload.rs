@@ -25,7 +25,7 @@ async fn upload_page_renders_when_logged_in() {
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/upload", &app.address))
+        .get(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -47,18 +47,17 @@ async fn permalink_without_caption_renders() {
         .fetch_one(&app.db_pool)
         .await
         .unwrap();
-    let post_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO posts (user_id, caption) VALUES ($1, NULL) RETURNING id",
-    )
-    .bind(user_id)
-    .fetch_one(&app.db_pool)
-    .await
-    .unwrap();
+    let post_id: Uuid =
+        sqlx::query_scalar("INSERT INTO posts (user_id, caption) VALUES ($1, NULL) RETURNING id")
+            .bind(user_id)
+            .fetch_one(&app.db_pool)
+            .await
+            .unwrap();
 
     // Act
     let response = app
         .api_client
-        .get(&format!("{}/p/{post_id}", &app.address))
+        .get(format!("{}/p/{post_id}", app.address))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -80,7 +79,7 @@ async fn upload_requires_login() {
     // Act — anonymous page visit
     let page = app
         .api_client
-        .get(&format!("{}/upload", &app.address))
+        .get(format!("{}/upload", app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -88,7 +87,7 @@ async fn upload_requires_login() {
     // Act — anonymous multipart submit
     let submit = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .multipart(
             reqwest::multipart::Form::new()
                 .text("caption", "sneaky")
@@ -107,7 +106,10 @@ async fn upload_requires_login() {
     assert_eq!(303, submit.status().as_u16());
     assert_eq!(
         Some("/login"),
-        submit.headers().get("Location").and_then(|v| v.to_str().ok())
+        submit
+            .headers()
+            .get("Location")
+            .and_then(|v| v.to_str().ok())
     );
 }
 
@@ -124,7 +126,7 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
     // Act — upload
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -143,9 +145,12 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
         .and_then(|v| v.to_str().ok())
         .expect("upload should redirect")
         .to_string();
-    assert!(location.starts_with("/p/"), "redirect target is the permalink");
+    assert!(
+        location.starts_with("/p/"),
+        "redirect target is the permalink"
+    );
 
-    let post_id = location.trim_start_matches("/p/");
+    let _post_id = location.trim_start_matches("/p/");
 
     // Media + derivatives persisted, owned by the uploader
     let media_row: (Uuid, i64) = sqlx::query_as(
@@ -171,7 +176,7 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
     // Permalink renders the photo (medium variant) with the caption
     let page = app
         .api_client
-        .get(&format!("{}{}", &app.address, location))
+        .get(format!("{}{}", app.address, location))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -185,10 +190,7 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
     // Serving: medium variant is a real 640x400 JPEG with immutable cache
     let served = app
         .api_client
-        .get(&format!(
-            "{}/media/{}/medium",
-            &app.address, media_row.0
-        ))
+        .get(format!("{}/media/{}/medium", app.address, media_row.0))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -196,11 +198,19 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
     assert_eq!(200, served.status().as_u16());
     assert_eq!(
         "image/jpeg",
-        served.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap()
+        served
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
     );
     assert_eq!(
         "public, max-age=31536000, immutable",
-        served.headers().get("Cache-Control").and_then(|v| v.to_str().ok()).unwrap()
+        served
+            .headers()
+            .get("Cache-Control")
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
     );
     let bytes = served.bytes().await.unwrap();
     let decoded = image::load_from_memory(&bytes).unwrap();
@@ -226,7 +236,7 @@ async fn upload_rejects_non_image_with_422() {
     // Act
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -250,7 +260,7 @@ async fn original_variant_is_never_publicly_served() {
     let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .multipart(
             reqwest::multipart::Form::new()
@@ -266,19 +276,23 @@ async fn original_variant_is_never_publicly_served() {
         .send()
         .await
         .expect("upload should succeed");
-    let location = response.headers().get("Location").and_then(|v| v.to_str().ok()).unwrap().to_string();
+    let location = response
+        .headers()
+        .get("Location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap()
+        .to_string();
     let post_id = location.trim_start_matches("/p/");
-    let media_id: Uuid =
-        sqlx::query_scalar("SELECT media_id FROM post_media WHERE post_id = $1")
-            .bind(Uuid::parse_str(post_id).unwrap())
-            .fetch_one(&app.db_pool)
-            .await
-            .unwrap();
+    let media_id: Uuid = sqlx::query_scalar("SELECT media_id FROM post_media WHERE post_id = $1")
+        .bind(Uuid::parse_str(post_id).unwrap())
+        .fetch_one(&app.db_pool)
+        .await
+        .unwrap();
 
     // Act — request the original (EXIF-bearing) bytes
     let response = app
         .api_client
-        .get(&format!("{}/media/{}/original", &app.address, media_id))
+        .get(format!("{}/media/{}/original", app.address, media_id))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -313,7 +327,7 @@ async fn photo_set_upload_stores_multiple_images_in_order() {
     // Act
     let response = app
         .api_client
-        .post(&format!("{}/upload", &app.address))
+        .post(format!("{}/upload", app.address))
         .header("Cookie", &cookie)
         .multipart(form)
         .send()
@@ -322,12 +336,11 @@ async fn photo_set_upload_stores_multiple_images_in_order() {
 
     // Assert — both images attached, positions preserved
     assert_eq!(303, response.status().as_u16());
-    let rows: Vec<(Uuid, i32)> = sqlx::query_as(
-        "SELECT media_id, position FROM post_media ORDER BY position",
-    )
-    .fetch_all(&app.db_pool)
-    .await
-    .unwrap();
+    let rows: Vec<(Uuid, i32)> =
+        sqlx::query_as("SELECT media_id, position FROM post_media ORDER BY position")
+            .fetch_all(&app.db_pool)
+            .await
+            .unwrap();
     assert_eq!(2, rows.len());
     assert_eq!(vec![0, 1], rows.iter().map(|r| r.1).collect::<Vec<_>>());
     let _ = DynamicImage::new_rgb8(1, 1); // keep image crate import honest
