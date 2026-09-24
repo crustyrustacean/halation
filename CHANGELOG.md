@@ -2,7 +2,24 @@
 
 All notable changes to the Halation project will be documented in this file.
 
-## [Unreleased]
+## [0.13.0] - 2026-09-24
+
+### Added — registration close (shareable portfolio mode)
+
+Registration can be shut while the platform is under active development —
+existing members log in unaffected, anonymous visitors can browse.
+
+- `application.registration_open` config flag (default `true`; env
+  `APP_APPLICATION__REGISTRATION_OPEN`), `production.yaml` ships `false`
+- `GET/POST /register` → 303 `/register/closed` when shut — the POST
+  refuses before rate-limit budget or any database work, so curl can't
+  create accounts either
+- New `/register/closed` page; the nav Register link and the login page's
+  sign-up nudge hide while closed (site-wide flags now ride the template
+  renderer via `TeraRenderer::with_site` — handlers stay out of it)
+- New test module `registration_closed` (open renders, closed redirects +
+  hides links, refused POST creates no account); `spawn_app_with` tweaks
+  config per test
 
 ### Changed — per-user storage partitioning
 
@@ -25,8 +42,8 @@ literal per-user-bucket backend open as a future option.
 - Serving is unchanged: `/media/{media_id}/{variant}` resolves keys through
   the database, so URLs and browser caches are unaffected
 
-*80 tests green (37 lib + 40 API + 3 backfill), zero warnings on
-`--all-targets`.*
+83 tests green (37 lib + 40 API + 3 backfill + 3 registration), zero
+warnings on `--all-targets`.
 
 ## [0.12.0] - 2026-10-01
 

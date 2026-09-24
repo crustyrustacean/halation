@@ -5,16 +5,28 @@ use anyhow::Context;
 use tera::{Context as TeraContext, Tera};
 pub struct TeraRenderer {
     engine: Tera,
+    /// Site-wide settings every template sees (e.g. whether the Register
+    /// nav link renders), injected here so no handler has to remember it.
+    site: serde_json::Map<String, serde_json::Value>,
 }
 
 impl TeraRenderer {
     pub fn new() -> Result<Self, TemplateError> {
+        Self::with_site(serde_json::Map::new())
+    }
+
+    /// Build a renderer that injects `site` into every render context.
+    /// Handlers stay free of site-wide flags; templates read them as
+    /// `{{ site.registration_open }}`.
+    pub fn with_site(
+        site: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Self, TemplateError> {
         let mut engine = Tera::default();
         engine
             .load_from_glob("templates/**/*.html")
             .context("Unable to load the templates")?;
 
-        Ok(Self { engine })
+        Ok(Self { engine, site })
     }
 
     pub fn engine(&self) -> &Tera {
@@ -32,8 +44,14 @@ impl TemplateRenderer for TeraRenderer {
             return Err(TemplateError::NotFound(template_name.to_string()));
         }
 
-        let template_context =
+        let mut template_context =
             TeraContext::from_serialize(context).context("Unable to build the page context")?;
+        // Site-wide settings ride along on every render; templates guard
+        // with `| default(value=true)` so bare `TeraRenderer::new()` (tests,
+        // tooling) keeps rendering pages that mention the flag.
+        if !self.site.is_empty() {
+            template_context.insert("site", &self.site);
+        }
 
         let output = self
             .engine

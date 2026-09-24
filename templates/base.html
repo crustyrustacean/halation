@@ -19,7 +19,9 @@
                 <form method="post" action="/logout" class="inline-form"><button type="submit" class="link-button">Log out</button></form>
                 {% else %}
                 <a href="/login">Log in</a>
+                {% if site.registration_open | default(value=true) %}
                 <a href="/register">Register</a>
+                {% endif %}
                 {% endif %}
             </nav>
         </div>

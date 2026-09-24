@@ -1,4 +1,7 @@
 application:
   host: 0.0.0.0
+  # Registration is closed while Halation is under active development —
+  # flip to true (or APP_APPLICATION__REGISTRATION_OPEN=true) to reopen.
+  registration_open: false
 database:
   require_ssl: true

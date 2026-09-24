@@ -95,6 +95,32 @@ fn validate_registration(
 // registration
 // ---------------------------------------------------------------------------
 
+/// GET /register/closed — the "registration is closed" page. Served for
+/// logged-in visitors too (direct navigation is harmless and the page
+/// links back to /login).
+pub async fn get_registration_closed_page(
+    templates: web::Data<Box<dyn TemplateRenderer>>,
+    identity: Option<Identity>,
+) -> Result<HttpResponse, Error> {
+    let context = AuthPageContext {
+        title: "Registration closed",
+        header: "Halation",
+        sub_header: "Registration is closed.",
+        logged_in: identity.is_some(),
+        errors: Vec::new(),
+        notice: None,
+        username: None,
+        email: None,
+    };
+
+    let body = render_page(
+        templates.get_ref().as_ref(),
+        "registration_closed.html",
+        &serde_json::to_value(&context)?,
+    )?;
+    Ok(html(actix_web::http::StatusCode::OK, body))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RegisterFormData {
     pub username: String,
@@ -104,8 +130,15 @@ pub struct RegisterFormData {
 
 pub async fn get_register_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
+    registration_open: web::Data<bool>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
+    if !**registration_open {
+        return Ok(HttpResponse::SeeOther()
+            .insert_header(("Location", "/register/closed"))
+            .finish());
+    }
+
     let context = AuthPageContext {
         title: "Register",
         header: "Halation",
@@ -131,7 +164,17 @@ pub async fn post_register(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     db: web::Data<Box<dyn DatabaseBackend>>,
     rate_limiter: web::Data<RateLimiter>,
+    registration_open: web::Data<bool>,
 ) -> Result<HttpResponse, Error> {
+    // Registration closed: refuse before burning rate-limit budget or
+    // touching the database. A 303 to the closed page keeps no-JS
+    // browsers on a sensible page instead of a dead form.
+    if !**registration_open {
+        return Ok(HttpResponse::SeeOther()
+            .insert_header(("Location", "/register/closed"))
+            .finish());
+    }
+
     // Rate limit per IP: 5 per 15 minutes, burst 5
     let decision = rate_limiter.check(&format!("register:{}", peer_ip(&req)));
     if !decision.allowed {

@@ -26,6 +26,15 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub base_url: String,
+    /// Open self-service registration? Defaults true (local + tests);
+    /// `production.yaml` ships false while the platform is under active
+    /// development — existing accounts log in unaffected.
+    #[serde(default = "default_registration_open")]
+    pub registration_open: bool,
+}
+
+fn default_registration_open() -> bool {
+    true
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -269,5 +278,7 @@ mod tests {
         assert_eq!("memory", settings.storage.backend);
         assert_eq!("", settings.storage.r2.bucket);
         assert_eq!("", settings.storage.r2.access_key.expose_secret());
+        // registration_open defaults true when the key is absent entirely
+        assert!(settings.application.registration_open);
     }
 }

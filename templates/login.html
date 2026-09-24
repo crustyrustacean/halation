@@ -21,6 +21,8 @@
         <button type="submit">Log in</button>
     </form>
 
+    {% if site.registration_open | default(value=true) %}
     <p class="auth-alt">New here? <a href="/register">Create an account</a></p>
+    {% endif %}
 </section>
 {% endblock %}

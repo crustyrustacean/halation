@@ -31,9 +31,17 @@ pub struct TestApp {
 }
 
 pub async fn spawn_app() -> TestApp {
+    spawn_app_with(Box::new(|_| {})).await
+}
+
+/// Spawn a test app after tweaking the configuration (e.g. closing
+/// registration) — the same hermetic setup as `spawn_app`.
+pub async fn spawn_app_with(
+    configure: Box<dyn FnOnce(&mut halation::configuration::Settings)>,
+) -> TestApp {
     LazyLock::force(&TRACING);
 
-    let configuration = {
+    let mut configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
 
         c.database.database_name = Uuid::new_v4().to_string();
@@ -44,6 +52,7 @@ pub async fn spawn_app() -> TestApp {
 
         c
     };
+    configure(&mut configuration);
 
     configure_database(&configuration.database).await;
 

@@ -131,8 +131,16 @@ async fn run(
     let database: Box<dyn DatabaseBackend> = Box::new(PostgresDatabase::new(db_pool.clone()));
     let database = web::Data::new(database);
 
-    let template_renderer: web::Data<Box<dyn TemplateRenderer>> =
-        web::Data::new(Box::new(TeraRenderer::new()?));
+    let template_renderer: web::Data<Box<dyn TemplateRenderer>> = {
+        // Site-wide settings injected into every render context — the nav
+        // Register link and the login page's sign-up nudge read these.
+        let mut site = serde_json::Map::new();
+        site.insert(
+            "registration_open".into(),
+            serde_json::json!(configuration.application.registration_open),
+        );
+        web::Data::new(Box::new(TeraRenderer::with_site(site)?) as Box<dyn TemplateRenderer>)
+    };
 
     let storage: Box<dyn StorageBackend> = match configuration.storage.backend.as_str() {
         "s3" => Box::new(OpendalStorageBackend::new(&configuration.storage)?),
@@ -141,6 +149,7 @@ async fn run(
     let storage_backend = web::Data::new(storage);
 
     let rate_limiter = web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
+    let registration_open = web::Data::new(configuration.application.registration_open);
     let geocoder = web::Data::new(Geocoder::new(
         configuration.geocode.enabled,
         configuration.geocode.base_url.clone(),
@@ -195,6 +204,10 @@ async fn run(
             // Classic form auth: full-page POSTs with SameSite=Lax protection
             .route("/register", web::get().to(auth::get_register_page))
             .route("/register", web::post().to(auth::post_register))
+            .route(
+                "/register/closed",
+                web::get().to(auth::get_registration_closed_page),
+            )
             .route("/login", web::get().to(auth::get_login_page))
             .route("/login", web::post().to(auth::post_login))
             .route("/logout", web::post().to(auth::post_logout))
@@ -231,6 +244,7 @@ async fn run(
             .app_data(template_renderer.clone())
             .app_data(storage_backend.clone())
             .app_data(rate_limiter.clone())
+            .app_data(registration_open.clone())
             .app_data(geocoder.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()
