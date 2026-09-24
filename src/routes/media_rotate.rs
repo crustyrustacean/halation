@@ -23,10 +23,10 @@ pub async fn rotate_media(
     let Some(identity) = identity else {
         return Ok(Either::Left(HttpResponse::Unauthorized().finish()));
     };
-    let Ok(user_id) = identity.id().map_err(|e| crate::utils::e500(e)) else {
+    let Ok(user_id) = identity.id().map_err(crate::utils::e500) else {
         return Err(crate::utils::e500("unreadable identity"));
     };
-    let Ok(user_id) = Uuid::parse_str(&user_id).map_err(|e| crate::utils::e500(e)) else {
+    let Ok(user_id) = Uuid::parse_str(&user_id).map_err(crate::utils::e500) else {
         return Err(crate::utils::e500("unreadable identity"));
     };
     let media_id = path.into_inner();
@@ -37,7 +37,7 @@ pub async fn rotate_media(
     .bind(media_id)
     .fetch_optional(pool.get_ref())
     .await
-    .map_err(|e| crate::utils::e500(e))?;
+    .map_err(crate::utils::e500)?;
 
     let Some((owner_id, storage_key, rotation, version)) = row else {
         return Ok(Either::Left(HttpResponse::NotFound().finish()));
@@ -51,9 +51,9 @@ pub async fn rotate_media(
     let raw = storage
         .find(&storage_key)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     let exif_orientation = media::exif_orientation(&raw);
-    let (mut img, _mime) = media::decode_image(&raw).map_err(|e| crate::utils::e500(e))?;
+    let (mut img, _mime) = media::decode_image(&raw).map_err(crate::utils::e500)?;
     img.apply_orientation(exif_orientation);
 
     let new_rotation = (rotation + 90) % 360;
@@ -62,7 +62,7 @@ pub async fn rotate_media(
     let derivatives =
         media::store_derivatives(storage.get_ref().as_ref(), media_id, &img)
             .await
-            .map_err(|e| crate::utils::e500(e))?;
+            .map_err(crate::utils::e500)?;
     let new_version = version + 1;
 
     sqlx::query(
@@ -75,7 +75,7 @@ pub async fn rotate_media(
     .bind(img.height() as i32)
     .execute(pool.get_ref())
     .await
-    .map_err(|e| crate::utils::e500(e))?;
+    .map_err(crate::utils::e500)?;
 
     for derivative in &derivatives {
         sqlx::query(
@@ -89,14 +89,14 @@ pub async fn rotate_media(
         .bind(derivative.size_bytes)
         .execute(pool.get_ref())
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     }
 
     // Re-render the media block (with the bumped version as cache buster)
     // and replace it in place via Datastar.
     let page = crate::posts::load_post_media_block_for_media(pool.get_ref(), media_id)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     let media = page.ok_or_else(|| crate::utils::e500("rotated media has no post"))?;
 
     let block = serde_json::json!({ "media": media, "can_rotate": true });

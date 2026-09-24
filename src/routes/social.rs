@@ -13,8 +13,8 @@ use uuid::Uuid;
 fn viewer_id(identity: Option<&Identity>) -> Result<Option<Uuid>, Error> {
     match identity {
         Some(identity) => {
-            let raw = identity.id().map_err(|e| crate::utils::e500(e))?;
-            let id = Uuid::parse_str(&raw).map_err(|e| crate::utils::e500(e))?;
+            let raw = identity.id().map_err(crate::utils::e500)?;
+            let id = Uuid::parse_str(&raw).map_err(crate::utils::e500)?;
             Ok(Some(id))
         }
         None => Ok(None),
@@ -29,7 +29,7 @@ fn follow_button(
     let context = serde_json::json!({ "username": username, "is_following": is_following });
     templates
         .render("partials/follow_button.html", &context)
-        .map_err(|e| crate::utils::e500(e))
+        .map_err(crate::utils::e500)
 }
 
 fn button_swap(html: String) -> Sse {
@@ -55,7 +55,7 @@ pub async fn follow_user(
 
     let Some(target) = follows::find_user_id_by_username(pool.get_ref(), &username)
         .await
-        .map_err(|e| crate::utils::e500(e))?
+        .map_err(crate::utils::e500)?
     else {
         return Ok(Either::Left(HttpResponse::NotFound().finish()));
     };
@@ -67,7 +67,7 @@ pub async fn follow_user(
 
     follows::follow(pool.get_ref(), viewer, target)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     let html = follow_button(templates.get_ref().as_ref(), &username, true)?;
     Ok(Either::Right(button_swap(html)))
@@ -87,14 +87,14 @@ pub async fn unfollow_user(
 
     let Some(target) = follows::find_user_id_by_username(pool.get_ref(), &username)
         .await
-        .map_err(|e| crate::utils::e500(e))?
+        .map_err(crate::utils::e500)?
     else {
         return Ok(Either::Left(HttpResponse::NotFound().finish()));
     };
 
     follows::unfollow(pool.get_ref(), viewer, target)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     let html = follow_button(templates.get_ref().as_ref(), &username, false)?;
     Ok(Either::Right(button_swap(html)))
@@ -110,7 +110,7 @@ async fn render_social_list(
     // Unknown account → styled 404
     if follows::find_user_id_by_username(pool, username)
         .await
-        .map_err(|e| crate::utils::e500(e))?
+        .map_err(crate::utils::e500)?
         .is_none()
     {
         let context = serde_json::json!({
@@ -127,7 +127,7 @@ async fn render_social_list(
         "followers" => follows::followers_of(pool, username).await,
         _ => follows::following_of(pool, username).await,
     }
-    .map_err(|e| crate::utils::e500(e))?;
+    .map_err(crate::utils::e500)?;
 
     let label = if kind == "followers" { "Followers" } else { "Following" };
     let context = serde_json::json!({

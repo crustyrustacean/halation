@@ -67,11 +67,10 @@ pub fn parse_nominatim_location(json: &Value) -> Option<String> {
         "city",
         "county",
     ] {
-        if let Some(name) = address.get(key).and_then(|v| v.as_str()) {
-            if !name.is_empty() {
+        if let Some(name) = address.get(key).and_then(|v| v.as_str())
+            && !name.is_empty() {
                 return Some(name.to_string());
             }
-        }
     }
     None
 }

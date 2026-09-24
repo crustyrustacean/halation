@@ -34,7 +34,7 @@ pub async fn get_profile(
 
     let profile = posts::load_profile(pool.get_ref(), &username, viewer)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     match profile {
         Some(profile) => {
             let sub_header = match &profile.bio {

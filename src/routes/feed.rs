@@ -45,7 +45,7 @@ async fn render_feed_page(
 ) -> Result<HttpResponse, Error> {
     let (cards, has_more) = posts::load_recent_page(pool, before, FEED_PAGE_SIZE)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     let load_more_before = if has_more {
         cards.last().map(|card| card.id.to_string())
     } else {
@@ -115,7 +115,7 @@ pub async fn get_hashtag_feed(
     let tag = path.into_inner().to_lowercase();
     let (cards, _has_more) = posts::load_tag_page(pool.get_ref(), &tag, None, FEED_PAGE_SIZE)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     let context = serde_json::json!({
         "title": format!("#{tag}"),
@@ -142,7 +142,7 @@ pub async fn feed_fragment(
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
     let (cards, has_more) = posts::load_recent_page(pool.get_ref(), before, FEED_PAGE_SIZE)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     let cards_html = render_cards(templates.get_ref().as_ref(), &cards)?;
     let mut events = vec![PatchElements::new(cards_html)

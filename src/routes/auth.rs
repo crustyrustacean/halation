@@ -166,7 +166,7 @@ pub async fn post_register(
         }
     };
 
-    let password_hash = hash_password(&form.password).map_err(|e| crate::utils::e500(e))?;
+    let password_hash = hash_password(&form.password).map_err(crate::utils::e500)?;
 
     match insert_user(
         pool.get_ref(),
@@ -299,7 +299,7 @@ pub async fn post_login(
     };
 
     let password_ok = verify_password(&form.password, &user.password_hash)
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     if !password_ok {
         return Ok(failure().await);
     }
@@ -307,21 +307,21 @@ pub async fn post_login(
     // Establish identity (actix-identity stores it inside the session) and
     // plant the metadata our SessionStore lifts into queryable columns.
     Identity::login(&req.extensions(), user.id.to_string())
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     let session = req.get_session();
     session
         .insert("user_id", user.id.to_string())
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     if let Some(ua) = req.headers().get(actix_web::http::header::USER_AGENT) {
         session
             .insert("login_user_agent", ua.to_str().unwrap_or_default())
-            .map_err(|e| crate::utils::e500(e))?;
+            .map_err(crate::utils::e500)?;
     }
     if let Some(ip) = req.peer_addr() {
         session
             .insert("login_ip", ip.to_string())
-            .map_err(|e| crate::utils::e500(e))?;
+            .map_err(crate::utils::e500)?;
     }
 
     Ok(HttpResponse::SeeOther().insert_header(("Location", "/")).finish())

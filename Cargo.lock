@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "halation"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "actix-cors",
  "actix-files",

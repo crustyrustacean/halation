@@ -105,11 +105,11 @@ pub async fn post_upload(
 
     // Pipeline: process each file, then persist media rows + the post in a
     // single transaction so a half-uploaded post can never exist.
-    let mut tx = pool.begin().await.map_err(|e| crate::utils::e500(e))?;
+    let mut tx = pool.begin().await.map_err(crate::utils::e500)?;
 
-    let post_id = posts::create_post(&mut *tx, user_id, &caption)
+    let post_id = posts::create_post(&mut tx, user_id, &caption)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
 
     for (position, file) in form.files.iter().enumerate() {
         let raw = std::fs::read(file.file.path())
@@ -130,9 +130,9 @@ pub async fn post_upload(
             Err(e) => return Err(crate::utils::e500(e)),
         };
 
-        let media_id = media::insert_media(&mut *tx, user_id, &stored, None)
+        let media_id = media::insert_media(&mut tx, user_id, &stored, None)
             .await
-            .map_err(|e| crate::utils::e500(e))?;
+            .map_err(crate::utils::e500)?;
 
         sqlx::query(
             "INSERT INTO post_media (post_id, media_id, position) VALUES ($1, $2, $3)",
@@ -142,7 +142,7 @@ pub async fn post_upload(
         .bind(position as i32)
         .execute(&mut *tx)
         .await
-        .map_err(|e| crate::utils::e500(e))?;
+        .map_err(crate::utils::e500)?;
     }
 
     // GPS -> location name: best-effort reverse geocode of the first
@@ -166,10 +166,10 @@ pub async fn post_upload(
             .bind(name)
             .execute(&mut *tx)
             .await
-            .map_err(|e| crate::utils::e500(e))?;
+            .map_err(crate::utils::e500)?;
     }
 
-    tx.commit().await.map_err(|e| crate::utils::e500(e))?;
+    tx.commit().await.map_err(crate::utils::e500)?;
 
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", format!("/p/{post_id}")))
@@ -189,7 +189,7 @@ pub async fn get_post_page(
 
     match crate::posts::load_post_page(pool.get_ref(), post_id)
         .await
-        .map_err(|e| crate::utils::e500(e))?
+        .map_err(crate::utils::e500)?
     {
         Some(page) => {
             let mut context = serde_json::to_value(&page)?;
