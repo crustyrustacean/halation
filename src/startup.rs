@@ -41,6 +41,12 @@ pub struct Application {
 
 impl Application {
     pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
+        // Before anything with a side effect: a test run must never reach
+        // real object storage, whatever the surrounding environment says.
+        if let Err(why) = crate::configuration::assert_no_remote_storage(&configuration) {
+            return Err(anyhow::anyhow!(why));
+        }
+
         // Fail fast and self-heal: create the database if it doesn't exist
         // and apply migrations, so `cargo run` works on a fresh machine.
         ensure_database_exists(&configuration.database).await?;
@@ -254,4 +260,98 @@ async fn run(
     .run();
 
     Ok(server)
+}
+
+/// Reject anything that is not a plain, safely quotable database name.
+///
+/// `CREATE DATABASE` cannot be parameterised, so the name reaches the
+/// statement as text. This allowlist is the check that makes that safe:
+/// lowercase letters, digits and underscores only, starting with a letter.
+/// That excludes the double quote (the only character that could break out
+/// of the quoted identifier), every punctuation character, and separators
+/// needed for schema-qualified or multi-statement forms.
+///
+/// Test databases are generated as UUIDs, which arrive lowercased here;
+/// an uppercase name is rejected rather than silently folded, so a
+/// misconfiguration fails loudly instead of creating a surprising database.
+fn validate_database_name(name: &str) -> anyhow::Result<&str> {
+    let mut chars = name.chars();
+    // The first character may be a letter *or a digit*: the test harness
+    // names throwaway databases with random UUIDs, and roughly 5 in 8 of
+    // those begin with a hex digit, so requiring a letter made
+    // `build_bootstraps_a_missing_database` fail on most runs. Digits are
+    // safe here because the name is always emitted inside double quotes.
+    let starts_validly =
+        matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit());
+    // Hyphens are allowed because the test harness names throwaway
+    // databases with UUIDs (`d3af3912-…`). Postgres accepts a hyphen in a
+    // quoted identifier, and it is as inert as an underscore for injection
+    // purposes; what matters is that the double quote is excluded.
+    let rest_are_safe =
+        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+
+    if starts_validly && rest_are_safe && !name.is_empty() {
+        Ok(name)
+    } else {
+        Err(anyhow::anyhow!(
+            "database name {name:?} is not a plain identifier — use lowercase \
+             letters, digits, underscores and hyphens, starting with a letter \
+             or digit (got it from APP_DATABASE__DATABASE_NAME or database_name \
+             in config)"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod database_name_tests {
+    use super::validate_database_name;
+
+    #[test]
+    fn accepts_plain_identifiers() {
+        assert_eq!("halation", validate_database_name("halation").unwrap());
+        assert_eq!("test_db_1", validate_database_name("test_db_1").unwrap());
+        // A UUID test database, lowercased.
+        let uuid = "d3af3912-bee4-45cc-86cf-f69b7f0e67cb";
+        assert_eq!(uuid, validate_database_name(uuid).unwrap());
+    }
+
+    #[test]
+    fn accepts_uuid_names_starting_with_a_digit() {
+        // Regression: the harness picks a *random* database UUID, and
+        // roughly 5 in 8 begin with a hex digit. A leading digit must be
+        // accepted or `build_bootstraps_a_missing_database` fails on most
+        // runs while appearing to pass on others.
+        for uuid in [
+            "4e56999e-e480-4d4e-b5ed-2855fd9c129d",
+            "0f9a1c22-1111-4222-8333-444455556666",
+            "7a3d9e01-2222-4333-8444-555566667777",
+        ] {
+            assert_eq!(uuid, validate_database_name(uuid).unwrap(), "{uuid}");
+        }
+    }
+
+    #[test]
+    fn rejects_quote_escapes_and_punctuation() {
+        // The double quote is the one character that could terminate the
+        // quoted identifier and append statements.
+        assert!(validate_database_name(r#"h"; DROP DATABASE postgres; --"#).is_err());
+        assert!(validate_database_name("h\"x").is_err());
+        assert!(validate_database_name("postgres; SELECT 1").is_err());
+        // Schema-qualified and wildcard forms have no business here.
+        assert!(validate_database_name("public.halation").is_err());
+        assert!(validate_database_name("db*").is_err());
+        // A hyphen is inert for injection purposes and is what the test
+        // harness's UUID database names contain, so it must be accepted.
+        assert_eq!("db-name", validate_database_name("db-name").unwrap());
+    }
+
+    #[test]
+    fn rejects_bad_shapes() {
+        assert!(validate_database_name("").is_err(), "empty");
+        assert!(validate_database_name("_db").is_err(), "leading underscore");
+        assert!(validate_database_name("Halation").is_err(), "uppercase");
+        assert!(validate_database_name("db name").is_err(), "space");
+        assert!(validate_database_name("db\n").is_err(), "newline");
+        assert!(validate_database_name("héllo").is_err(), "non-ascii");
+    }
 }
