@@ -2,8 +2,8 @@
 
 use crate::authentication::{NewUser, User, UserStoreError};
 use crate::follows::AccountSummary;
-use crate::posts::{MediaRotation, PostCard, PostMediaView, PostPage, ProfileView};
-use crate::services::media::{Derivative, StoredMedia};
+use crate::posts::{PostCard, PostPage, ProfileView};
+use crate::services::media::StoredMedia;
 use crate::utils::error_chain_fmt;
 use actix_web::{ResponseError, http::StatusCode};
 use async_trait::async_trait;
@@ -138,13 +138,6 @@ pub trait DatabaseBackend: Send + Sync {
     /// tags. `None` for unknown or deleted posts.
     async fn load_post_page(&self, post_id: Uuid) -> Result<Option<PostPage>, DatabaseError>;
 
-    /// Media views for the post that owns `media_id` — used by the
-    /// rotate fragment to re-render the block with bumped versions.
-    async fn load_media_block_for_media(
-        &self,
-        media_id: Uuid,
-    ) -> Result<Option<Vec<PostMediaView>>, DatabaseError>;
-
     /// The public view of an account: no email, no hash — only what a
     /// visitor may see. `None` for unknown accounts.
     async fn load_profile(
@@ -152,25 +145,6 @@ pub trait DatabaseBackend: Send + Sync {
         username: &str,
         viewer: Option<Uuid>,
     ) -> Result<Option<ProfileView>, DatabaseError>;
-
-    /// The media row state the rotate flow needs, fetched in one go.
-    async fn media_for_rotation(
-        &self,
-        media_id: Uuid,
-    ) -> Result<Option<MediaRotation>, DatabaseError>;
-
-    /// Persist a manual rotation: the cumulative angle, the rotated
-    /// dimensions, a version bump (cache buster), and the regenerated
-    /// derivatives' dimensions, sizes — and storage keys, so the database
-    /// stays the single source of truth for where the bytes live.
-    async fn apply_rotation(
-        &self,
-        media_id: Uuid,
-        rotation: i32,
-        width: u32,
-        height: u32,
-        derivatives: &[Derivative],
-    ) -> Result<(), DatabaseError>;
 
     /// Storage key of a processed derivative variant (`thumb`, `medium`,
     /// `large`); `None` when the media or variant does not exist.

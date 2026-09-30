@@ -1,25 +1,18 @@
+{# The photo itself, for the post page.
+
+   A single photo is shown as one image. A multi-photo post is a set, and
+   every photo in the set links to the same permalink this page already is
+   — so linking them would be circular. Each one is therefore a plain image
+   and the set is a grid, not a gallery.
+
+   `large` (long edge 1080px) rather than `medium` (640px): this is the page
+   you arrive at in order to look at the photograph, and the feed already
+   shows `medium` at a glance. `large` is generated and stored for every
+   upload, so this needs no new pipeline work. #}
 {% if media | length > 1 %}
 <div class="photo-set">
-    {% for m in media %}<img src="/media/{{ m.media_id }}/medium?v={{ m.version }}" alt="Photo">{% endfor %}
+    {% for m in media %}<img src="/media/{{ m.media_id }}/large?v={{ m.version }}" alt="Photo">{% endfor %}
 </div>
 {% else %}
-{% for m in media %}<img class="solo" src="/media/{{ m.media_id }}/medium?v={{ m.version }}" alt="Photo">{% endfor %}
-{% endif %}
-
-{% for m in media %}{% if m.exif %}
-<div class="meta">
-    {% if m.exif.make %}<span>{{ m.exif.make }}{% if m.exif.model %} {{ m.exif.model }}{% endif %}</span>{% endif %}
-    {% if m.exif.date_time_original %}<span>{{ m.exif.date_time_original }}</span>{% endif %}
-    {% if m.exif.focal_length %}<span>{{ m.exif.focal_length }}</span>{% endif %}
-    {% if m.exif.f_number %}<span>{{ m.exif.f_number }}</span>{% endif %}
-    {% if m.exif.exposure_time %}<span>{{ m.exif.exposure_time }}s</span>{% endif %}
-    {% if m.exif.iso %}<span>ISO {{ m.exif.iso }}</span>{% endif %}
-    {% if m.exif.gps_latitude %}<span>{{ m.exif.gps_latitude }}, {{ m.exif.gps_longitude }}</span>{% endif %}
-</div>
-{% endif %}{% endfor %}
-
-{% if can_rotate %}
-<div class="rotate-row">
-    {% for m in media %}<button class="rotate" data-on-click="@post('/fragments/media/{{ m.media_id }}/rotate')">⟳ rotate</button>{% endfor %}
-</div>
+{% for m in media %}<img class="solo" src="/media/{{ m.media_id }}/large?v={{ m.version }}" alt="Photo">{% endfor %}
 {% endif %}

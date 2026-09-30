@@ -6,9 +6,7 @@ use crate::configuration::{DatabaseSettings, Settings};
 use crate::database::{DatabaseBackend, PostgresDatabase};
 use crate::guards::require_datastar_request_header;
 use crate::routes::upload::UPLOAD_LIMIT_BYTES;
-use crate::routes::{
-    api, auth, feed, health_check, media_rotate, media_serving, pages, profile, social, upload,
-};
+use crate::routes::{api, auth, feed, health_check, media_serving, pages, profile, social, upload};
 use crate::services::RateLimiter;
 use crate::services::geocode::Geocoder;
 use crate::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
@@ -96,7 +94,7 @@ async fn ensure_database_exists(settings: &DatabaseSettings) -> Result<(), anyho
             if !missing {
                 return Err(anyhow::anyhow!(
                     "Failed to connect to Postgres at {}:{} as {} — is the dev \
-                     container running? (scripts/init_dev_db.sh starts it.)\n\t{e}",
+                     container running? (cargo xtask dev-db starts it.)\n\t{e}",
                     settings.host,
                     settings.port,
                     settings.username
@@ -111,7 +109,12 @@ async fn ensure_database_exists(settings: &DatabaseSettings) -> Result<(), anyho
             let mut conn = sqlx::PgConnection::connect_with(&maintenance.connect_options())
                 .await
                 .context("Failed to connect to the Postgres maintenance database")?;
-            sqlx::query(&format!(r#"CREATE DATABASE "{}""#, settings.database_name))
+            // `CREATE DATABASE` is a utility statement and cannot take bind
+            // parameters, so the name has to be interpolated. It is validated
+            // as a plain identifier first (see `validate_database_name`), so
+            // this assertion is backed by a real check rather than trust.
+            let name = validate_database_name(&settings.database_name)?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(r#"CREATE DATABASE "{name}""#)))
                 .execute(&mut conn)
                 .await
                 .context("Failed to create the application database")?;
@@ -215,10 +218,6 @@ async fn run(
             .route("/upload", web::get().to(upload::get_upload_page))
             .route("/upload", web::post().to(upload::post_upload))
             .route("/p/{post_id}", web::get().to(upload::get_post_page))
-            .route(
-                "/fragments/media/{media_id}/rotate",
-                web::post().to(media_rotate::rotate_media),
-            )
             .route(
                 "/media/{media_id}/{variant}",
                 web::get().to(media_serving::get_media_derivative),

@@ -3,6 +3,7 @@
 use crate::helpers::{register_and_login, spawn_app};
 use image::DynamicImage;
 use std::io::Cursor;
+use uuid::Uuid;
 
 /// Generate a real JPEG of the given dimensions for pipeline round-trips.
 fn test_jpeg(width: u32, height: u32) -> Vec<u8> {
@@ -173,7 +174,7 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
             .unwrap();
     assert_eq!(3, variants.len());
 
-    // Permalink renders the photo (medium variant) with the caption
+    // Permalink renders the photo at full size with the caption
     let page = app
         .api_client
         .get(format!("{}{}", app.address, location))
@@ -184,7 +185,7 @@ async fn upload_round_trip_creates_post_and_serves_derivatives() {
     assert_eq!(200, page.status().as_u16());
     let body = page.text().await.unwrap();
     assert!(body.contains("Olympics doing that thing again tonight."));
-    assert!(body.contains(&format!("/media/{}/medium", media_row.0)));
+    assert!(body.contains(&format!("/media/{}/large", media_row.0)));
     assert!(body.contains("jeff"));
 
     // Serving: medium variant is a real 640x400 JPEG with immutable cache
@@ -346,4 +347,44 @@ async fn photo_set_upload_stores_multiple_images_in_order() {
     let _ = DynamicImage::new_rgb8(1, 1); // keep image crate import honest
 }
 
-use uuid::Uuid;
+/// Upload a photo and return the *post* id from the permalink the upload
+/// handler redirects to.
+async fn upload_get_post_id(app: &crate::helpers::TestApp, cookie: &str) -> Uuid {
+    let location =
+        crate::helpers::upload_and_get_location(app, cookie, "look at me", 600, 400).await;
+    Uuid::parse_str(location.trim_start_matches("/p/")).expect("redirect should be a /p/{uuid}")
+}
+
+// The photo page must render the photo for the post's owner and for a
+// visitor. This used to live in rotate.rs, where it only checked for the
+// rotate button -- it passed while every interactive control in the app was
+// inert. It should assert what the page is actually FOR.
+#[tokio::test]
+async fn post_page_renders_the_photo_for_its_owner() {
+    // Arrange
+    let app = spawn_app().await;
+    let cookie = register_and_login(&app, "alice", "alice@example.com", "wonderland1").await;
+    let post_id = upload_get_post_id(&app, &cookie).await;
+    let media_id: Uuid = sqlx::query_scalar("SELECT media_id FROM post_media WHERE post_id = $1")
+        .bind(post_id)
+        .fetch_one(&app.db_pool)
+        .await
+        .expect("media row should exist");
+
+    // Act
+    let page = app
+        .api_client
+        .get(format!("{}/p/{post_id}", app.address))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .expect("request to fail");
+
+    // Assert
+    assert_eq!(page.status(), 200);
+    let body = page.text().await.expect("body to be text");
+    assert!(
+        body.contains(&format!("/media/{media_id}/large?v=")),
+        "photo page should show the large derivative of the post's media"
+    );
+}

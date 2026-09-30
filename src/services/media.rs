@@ -242,8 +242,6 @@ pub fn extract_exif(raw: &[u8]) -> Option<serde_json::Value> {
 }
 
 /// The EXIF Orientation tag of the raw bytes, as an image orientation.
-/// Used by the rotate flow so manual rotation stacks on top of the
-/// orientation the camera recorded.
 pub fn exif_orientation(raw: &[u8]) -> image::metadata::Orientation {
     let mut cursor = Cursor::new(raw);
     exif::Reader::new()
@@ -259,15 +257,6 @@ pub fn exif_orientation(raw: &[u8]) -> image::metadata::Orientation {
         })
         .and_then(image::metadata::Orientation::from_exif)
         .unwrap_or(image::metadata::Orientation::NoTransforms)
-}
-
-/// Rotate 90 degrees clockwise, N quarter-turns.
-pub fn rotate_cw(img: &DynamicImage, quarter_turns: u32) -> DynamicImage {
-    let mut img = img.clone();
-    for _ in 0..(quarter_turns % 4) {
-        img = img.rotate90();
-    }
-    img
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -353,8 +342,8 @@ pub fn is_legacy_key(owner_id: Uuid, storage_key: &str) -> bool {
 /// derivatives (thumb/medium/large, all EXIF-free by construction) → save
 /// everything under `{owner_id}/{media_id}/…` keys.
 /// Generate and store the derivative set for an image under
-/// `{owner_id}/{media_id}/{variant}.jpg`. Used by the upload pipeline and
-/// again by the rotate flow (same keys, new pixels, new dimensions).
+/// `{owner_id}/{media_id}/{variant}.jpg`. The image passed in must already
+/// be EXIF-corrected — see `decode_image`.
 pub(crate) async fn store_derivatives(
     storage: &dyn StorageBackend,
     owner_id: Uuid,

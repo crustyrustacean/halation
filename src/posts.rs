@@ -29,15 +29,6 @@ pub struct PostCard {
     pub hashtags: Vec<String>,
 }
 
-/// The media row state the rotate flow needs, fetched in one go.
-#[derive(Debug)]
-pub struct MediaRotation {
-    pub owner_id: Uuid,
-    pub storage_key: String,
-    pub rotation: i32,
-    pub version: i32,
-}
-
 // ---------------------------------------------------------------------------
 // hashtag parsing
 // ---------------------------------------------------------------------------

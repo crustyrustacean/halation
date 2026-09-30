@@ -4,10 +4,9 @@ use crate::authentication::{NewUser, User, UserStoreError};
 use crate::database::{DatabaseBackend, DatabaseError};
 use crate::follows::AccountSummary;
 use crate::posts::{
-    CardMedia, MediaRotation, PostCard, PostMediaView, PostPage, ProfileThumb, ProfileView,
-    parse_hashtags,
+    CardMedia, PostCard, PostMediaView, PostPage, ProfileThumb, ProfileView, parse_hashtags,
 };
-use crate::services::media::{Derivative, StoredMedia};
+use crate::services::media::StoredMedia;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -26,9 +25,6 @@ impl PostgresDatabase {
         Self { pool }
     }
 }
-
-const USER_COLUMNS: &str = "id, username::text AS username, email::text AS email, password_hash, display_name, bio, \
-     created_at, updated_at, deleted_at";
 
 // Positional row types. sqlx decodes tuples happily, but bare tuples in
 // annotations read terribly and trip `clippy::type_complexity` wherever
@@ -50,8 +46,6 @@ type MediaExifRow = (Uuid, Option<String>, i32);
 type ProfileRow = (Uuid, String, Option<String>, Option<String>, DateTime<Utc>);
 /// Profile grid rows: post id, first media id (posts without media yield NULLs).
 type ProfileThumbRow = (Uuid, Option<Uuid>, Option<i32>);
-/// `media` rotation state: owner id, storage key, cumulative rotation, version.
-type MediaStateRow = (Uuid, String, i32, i32);
 /// Feed page rows: post id, caption, location, username, created_at.
 type FeedRow = (Uuid, Option<String>, Option<String>, String, DateTime<Utc>);
 /// `post_media ⋈ media` for feeds: post id, media id, version.
@@ -76,14 +70,19 @@ impl DatabaseBackend for PostgresDatabase {
     // ------------------------------------------------------------------
 
     async fn insert_user(&self, new_user: NewUser) -> Result<User, UserStoreError> {
-        sqlx::query_as::<_, User>(&format!(
+        // A literal, not `format!` — the only interpolation was a
+        // compile-time constant column list. sqlx 0.9's `SqlSafeStr` bound
+        // refuses owned strings so that dynamic SQL is always a deliberate,
+        // reviewable choice; here it is not dynamic at all.
+        sqlx::query_as::<_, User>(
             "INSERT INTO users (username, email, password_hash)
-                 VALUES ($1, $2, $3)
-                 RETURNING {USER_COLUMNS}"
-        ))
+             VALUES ($1, $2, $3)
+             RETURNING id, username::text AS username, email::text AS email, password_hash,
+                       display_name, bio, created_at, updated_at, deleted_at",
+        )
         .bind(&new_user.username)
         .bind(&new_user.email)
-        .bind(&new_user.password_hash)
+        .bind(new_user.password_hash.expose())
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
@@ -106,12 +105,13 @@ impl DatabaseBackend for PostgresDatabase {
         &self,
         identifier: &str,
     ) -> Result<Option<User>, DatabaseError> {
-        let user = sqlx::query_as::<_, User>(&format!(
-            "SELECT {USER_COLUMNS}
-                 FROM users
-                 WHERE (username = $1 OR email = $1) AND deleted_at IS NULL
-                 LIMIT 1"
-        ))
+        let user = sqlx::query_as::<_, User>(
+            "SELECT id, username::text AS username, email::text AS email, password_hash,
+                    display_name, bio, created_at, updated_at, deleted_at
+             FROM users
+             WHERE (username = $1 OR email = $1) AND deleted_at IS NULL
+             LIMIT 1",
+        )
         .bind(identifier)
         .fetch_optional(&self.pool)
         .await
@@ -376,36 +376,6 @@ impl DatabaseBackend for PostgresDatabase {
         }))
     }
 
-    async fn load_media_block_for_media(
-        &self,
-        media_id: Uuid,
-    ) -> Result<Option<Vec<PostMediaView>>, DatabaseError> {
-        let post_id: Option<Uuid> =
-            sqlx::query_scalar("SELECT post_id FROM post_media WHERE media_id = $1 LIMIT 1")
-                .bind(media_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| {
-                    DatabaseError::Operation(anyhow!("Failed to find post for media: {e}"))
-                })?;
-
-        let Some(post_id) = post_id else {
-            return Ok(None);
-        };
-
-        let media: Vec<PostMediaView> = sqlx::query_as(
-            "SELECT pm.media_id, m.exif::text, m.version
-             FROM post_media pm JOIN media m ON m.id = pm.media_id
-             WHERE pm.post_id = $1 ORDER BY pm.position",
-        )
-        .bind(post_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load media block: {e}")))?;
-
-        Ok(Some(media))
-    }
-
     async fn load_profile(
         &self,
         username: &str,
@@ -486,77 +456,6 @@ impl DatabaseBackend for PostgresDatabase {
         }))
     }
 
-    async fn media_for_rotation(
-        &self,
-        media_id: Uuid,
-    ) -> Result<Option<MediaRotation>, DatabaseError> {
-        let row: Option<MediaStateRow> = sqlx::query_as(
-            "SELECT owner_id, storage_key, rotation, version FROM media WHERE id = $1",
-        )
-        .bind(media_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load media for rotation: {e}")))?;
-
-        Ok(
-            row.map(|(owner_id, storage_key, rotation, version)| MediaRotation {
-                owner_id,
-                storage_key,
-                rotation,
-                version,
-            }),
-        )
-    }
-
-    async fn apply_rotation(
-        &self,
-        media_id: Uuid,
-        rotation: i32,
-        width: u32,
-        height: u32,
-        derivatives: &[Derivative],
-    ) -> Result<(), DatabaseError> {
-        let mut tx =
-            self.pool.begin().await.map_err(|e| {
-                DatabaseError::Operation(anyhow!("Failed to begin transaction: {e}"))
-            })?;
-
-        sqlx::query(
-            "UPDATE media SET rotation = $2, version = version + 1, width = $3, height = $4
-             WHERE id = $1",
-        )
-        .bind(media_id)
-        .bind(rotation)
-        .bind(width as i32)
-        .bind(height as i32)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DatabaseError::Operation(anyhow!("Failed to update media rotation: {e}")))?;
-
-        for derivative in derivatives {
-            sqlx::query(
-                "UPDATE media_derivatives
-                 SET storage_key = $3, width = $4, height = $5, size_bytes = $6
-                 WHERE media_id = $1 AND variant = $2",
-            )
-            .bind(media_id)
-            .bind(derivative.variant)
-            .bind(&derivative.storage_key)
-            .bind(derivative.width as i32)
-            .bind(derivative.height as i32)
-            .bind(derivative.size_bytes)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DatabaseError::Operation(anyhow!("Failed to update derivative: {e}")))?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| DatabaseError::Operation(anyhow!("Failed to commit rotation: {e}")))?;
-
-        Ok(())
-    }
-
     async fn find_derivative_key(
         &self,
         media_id: Uuid,
@@ -577,8 +476,6 @@ impl DatabaseBackend for PostgresDatabase {
 // shared query helpers
 // ---------------------------------------------------------------------------
 
-const ACCOUNT_COLUMNS: &str = "u.username::text AS username, COALESCE(u.display_name, u.username::text) AS display_name, UPPER(SUBSTRING(u.username FROM 1 FOR 1)) AS initial";
-
 /// Accounts joined through the social graph, newest follow first.
 /// `followers = true` lists who follows `username`; otherwise the accounts
 /// `username` follows.
@@ -587,22 +484,29 @@ async fn account_list(
     username: &str,
     followers: bool,
 ) -> Result<Vec<AccountSummary>, DatabaseError> {
-    let (join, filter) = if followers {
-        ("u.id = f.follower_id", "f.followee_id")
-    } else {
-        ("u.id = f.followee_id", "f.follower_id")
-    };
-
-    let sql = format!(
-        "SELECT {ACCOUNT_COLUMNS}
+    // Two literal queries rather than a `format!` that swaps the join
+    // direction. The varying part is the direction of a fixed pair of
+    // column-to-column equality checks — never user input — so nothing
+    // needs to be bound, and both statements stay `&'static str`.
+    const FOLLOWERS: &str = "SELECT u.username::text AS username,
+         COALESCE(u.display_name, u.username::text) AS display_name,
+         UPPER(SUBSTRING(u.username FROM 1 FOR 1)) AS initial
          FROM follows f
-         JOIN users u ON {join}
-         JOIN users me ON me.id = {filter}
+         JOIN users u ON u.id = f.follower_id
+         JOIN users me ON me.id = f.followee_id
          WHERE me.username = $1
-         ORDER BY f.created_at DESC, u.username"
-    );
+         ORDER BY f.created_at DESC, u.username";
 
-    let rows: Vec<AccountSummary> = sqlx::query_as(&sql)
+    const FOLLOWING: &str = "SELECT u.username::text AS username,
+         COALESCE(u.display_name, u.username::text) AS display_name,
+         UPPER(SUBSTRING(u.username FROM 1 FOR 1)) AS initial
+         FROM follows f
+         JOIN users u ON u.id = f.followee_id
+         JOIN users me ON me.id = f.follower_id
+         WHERE me.username = $1
+         ORDER BY f.created_at DESC, u.username";
+
+    let rows: Vec<AccountSummary> = sqlx::query_as(if followers { FOLLOWERS } else { FOLLOWING })
         .bind(username)
         .fetch_all(pool)
         .await
@@ -638,30 +542,40 @@ async fn load_page(
     let cursor_created = before.as_ref().map(|(c, _)| *c);
     let cursor_id = before.as_ref().map(|(_, i)| *i);
 
-    let tag_filter = if tag.is_some() {
-        "JOIN post_hashtags ph ON ph.post_id = p.id
-         JOIN hashtags h ON h.id = ph.hashtag_id AND h.tag = $4"
-    } else {
-        ""
-    };
-
-    let sql = format!(
-        "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
+    // Two literal statements rather than a `format!` that splices in an
+    // optional join. `tag` is user input and is bound as $4 - never
+    // interpolated - so the only difference between the two statements is
+    // which joins are present, which is not dynamic data.
+    const FEED: &str = "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
          FROM posts p
          JOIN users u ON u.id = p.user_id
-         {tag_filter}
          WHERE (p.created_at, p.id) < (
              COALESCE($1, 'infinity'::timestamptz),
              COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
          )
          ORDER BY p.created_at DESC, p.id DESC
-         LIMIT $3"
-    );
+         LIMIT $3";
 
-    let mut query = sqlx::query_as::<_, FeedRow>(&sql)
-        .bind(cursor_created)
-        .bind(cursor_id)
-        .bind(limit + 1); // fetch one extra to detect has_more
+    const TAGGED_FEED: &str =
+        "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
+         FROM posts p
+         JOIN users u ON u.id = p.user_id
+         JOIN post_hashtags ph ON ph.post_id = p.id
+         JOIN hashtags h ON h.id = ph.hashtag_id AND h.tag = $4
+         WHERE (p.created_at, p.id) < (
+             COALESCE($1, 'infinity'::timestamptz),
+             COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
+         )
+         ORDER BY p.created_at DESC, p.id DESC
+         LIMIT $3";
+
+    let mut query = sqlx::query_as::<_, FeedRow>(match tag {
+        Some(_) => TAGGED_FEED,
+        None => FEED,
+    })
+    .bind(cursor_created)
+    .bind(cursor_id)
+    .bind(limit + 1); // fetch one extra to detect has_more
     if let Some(tag) = tag {
         query = query.bind(tag.to_string());
     }

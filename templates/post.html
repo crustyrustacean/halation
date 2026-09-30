@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 
+{# The photo page: the photograph, then the context a photographer actually
+   wants alongside it — where it was taken, what it says, when. The caption
+   and tags are kept because they are the only prose on the site; the EXIF
+   block was dropped deliberately, since the feed is the browsing surface and
+   this is the looking surface. #}
 {% block content %}
 <article class="post">
-        <div id="post-media">
-        {% include "partials/post_media_block.html" %}
-    </div>
+    {% include "partials/post_media_block.html" %}
 
     <div class="post-body">
-        {% if location_name %}<span class="chip">{{ location_name }}</span>{% endif %}
+        {% if location_name %}<span class="chip chip-inline">{{ location_name }}</span>{% endif %}
         {% if caption %}<p class="caption">{{ caption }}</p>{% endif %}
         {% if hashtags %}<p class="tags">{% for t in hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}
     </div>

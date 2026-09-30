@@ -171,11 +171,6 @@ pub async fn get_post_page(
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let post_id = path.into_inner();
-    let viewer_id = identity
-        .as_ref()
-        .and_then(|i| i.id().ok())
-        .and_then(|s| Uuid::parse_str(&s).ok());
-
     match db
         .load_post_page(post_id)
         .await
@@ -187,7 +182,6 @@ pub async fn get_post_page(
             context["header"] = serde_json::json!("Halation");
             context["sub_header"] = serde_json::json!("A post.");
             context["logged_in"] = serde_json::json!(identity.is_some());
-            context["can_rotate"] = serde_json::json!(viewer_id == Some(page.owner_id));
 
             let body = templates.render("post.html", &context)?;
             Ok(HttpResponse::Ok().content_type("text/html").body(body))

@@ -296,7 +296,7 @@ async fn profile_page_renders_grid_and_counts() {
 }
 
 #[tokio::test]
-async fn permalink_shows_the_exif_meta_row() {
+async fn permalink_shows_the_photo_and_not_the_exif_row() {
     // Arrange — upload a JPEG carrying EXIF (fixture committed for this phase)
     let app = spawn_app().await;
     let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
@@ -332,9 +332,20 @@ async fn permalink_shows_the_exif_meta_row() {
         .await
         .expect("Failed to execute request.");
 
-    // Assert — the EXIF meta row renders the camera, not the GPS (fixture has none)
+    // Assert — the photo page is the looking surface: the photograph at full
+    // size, the caption, the owner. The camera metadata row was deliberately
+    // removed; EXIF is still captured, stored, and asserted on elsewhere.
     assert_eq!(200, page.status().as_u16());
     let body = page.text().await.unwrap();
-    assert!(body.contains("TestMake"), "make renders in the meta row");
-    assert!(body.contains("TestModel"), "model renders in the meta row");
+    assert!(body.contains("with exif"), "the caption renders");
+    assert!(body.contains("jeff"), "the owner renders");
+    assert!(body.contains("/media/"), "the photo renders");
+    assert!(
+        body.contains("/large"),
+        "the photo page shows the large derivative"
+    );
+    assert!(
+        !body.contains("TestModel"),
+        "the EXIF row was removed from the photo page"
+    );
 }

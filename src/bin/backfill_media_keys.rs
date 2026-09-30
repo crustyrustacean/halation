@@ -242,13 +242,11 @@ mod tests {
             .await
             .expect("Failed to connect to Postgres");
         connection
-            .execute(
-                format!(
-                    r#"CREATE DATABASE "{}";"#,
-                    configuration.database.database_name
-                )
-                .as_str(),
-            )
+            // Test-database name, generated as a UUID by this test harness.
+            .execute(sqlx::AssertSqlSafe(format!(
+                r#"CREATE DATABASE "{}";"#,
+                configuration.database.database_name
+            )))
             .await
             .expect("Failed to create the test database");
 

@@ -134,18 +134,14 @@ article.post img { width: 100%; }
     content: ""; width: 6px; height: 6px;
     background: var(--gold); border-radius: 50%;
 }
-.chip::before {
-    content: ""; width: 6px; height: 6px;
-    background: var(--gold); border-radius: 50%;
+/* On the photo page the chip sits under the image beside the caption, not
+   over it — the feed overlays it on the photo, so the default is absolute
+   positioning and this opts back into normal flow. */
+.chip-inline {
+    position: static; display: inline-flex;
+    margin-bottom: 8px;
 }
 
-/* rotate controls */
-.rotate-row { display: flex; gap: 8px; padding: 4px 18px 12px; }
-button.rotate {
-    background: none; border: 1px solid var(--line); border-radius: 999px;
-    color: var(--muted); font-size: 12px; padding: 3px 10px;
-}
-button.rotate:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ------------------------------------------------------------
    load more (sits on navy, below the card stack)
