@@ -15,6 +15,7 @@ struct NotFoundContext {
 }
 
 /// default service — render the styled 404 page.
+#[tracing::instrument(skip_all, name = "handler::not_found")]
 pub async fn not_found(
     templates: Data<Box<dyn TemplateRenderer>>,
     identity: Option<Identity>,

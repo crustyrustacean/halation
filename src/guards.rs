@@ -22,6 +22,15 @@ pub const DATASTAR_REQUEST: &str = "Datastar-Request";
 /// Classic form POSTs (/register, /login, /logout) are NOT covered by this
 /// guard — they rely on `SameSite=Lax` cookies and are mounted outside any
 /// `/fragments` scope.
+/// Rejections are logged with the method and path: a burst of 403s from
+/// `/fragments/...` is the signature of a cross-site attempt and is worth
+/// seeing, whereas successful requests are already covered by the
+/// `TracingLogger` root span.
+#[tracing::instrument(
+    skip_all,
+    name = "guard::datastar_csrf",
+    fields(method = tracing::field::Empty, path = tracing::field::Empty)
+)]
 pub async fn require_datastar_request_header(
     req: ServiceRequest,
     next: Next<impl MessageBody>,
@@ -31,7 +40,14 @@ pub async fn require_datastar_request_header(
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
 
+    {
+        let span = tracing::Span::current();
+        span.record("method", tracing::field::display(req.method()));
+        span.record("path", tracing::field::display(req.path()));
+    }
+
     if is_mutation && req.headers().get(DATASTAR_REQUEST).is_none() {
+        tracing::warn!("rejected cross-site mutation: missing {DATASTAR_REQUEST} header");
         return Err(CsrfError.into());
     }
 

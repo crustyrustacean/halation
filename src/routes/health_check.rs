@@ -8,6 +8,7 @@ use actix_web::HttpResponse;
 /// middleware. A dependency blip must never fail a liveness probe — that
 /// way lies cascade-restarts of healthy machines. Dependency health lives
 /// at GET /api/v1/health.
+#[tracing::instrument(skip_all, name = "handler::liveness")]
 pub async fn health_check() -> HttpResponse {
     HttpResponse::Ok().finish()
 }

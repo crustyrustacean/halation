@@ -14,6 +14,13 @@ const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// Only processed variants are public; the original stays owner-private
 /// (it carries EXIF, including GPS). Long immutable cache headers: keys
 /// are content-addressed by media id + variant, so they never change.
+/// The variant is recorded rather than skipped: the refusal of the
+/// private `original` variant is a real event worth seeing in the logs.
+#[tracing::instrument(
+    skip_all,
+    name = "handler::media_derivative",
+    fields(media_id = tracing::field::Empty, variant = tracing::field::Empty)
+)]
 pub async fn get_media_derivative(
     db: web::Data<Box<dyn DatabaseBackend>>,
     storage: web::Data<Box<dyn StorageBackend>>,
@@ -21,6 +28,9 @@ pub async fn get_media_derivative(
     _req: HttpRequest,
 ) -> HttpResponse {
     let (media_id, variant) = path.into_inner();
+    let span = tracing::Span::current();
+    span.record("media_id", tracing::field::display(&media_id));
+    span.record("variant", tracing::field::display(&variant));
 
     if !PUBLIC_VARIANTS.contains(&variant.as_str()) {
         return HttpResponse::NotFound().finish();

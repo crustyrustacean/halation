@@ -21,6 +21,11 @@ struct ProfilePageContext {
 /// GET /u/{username} — the public profile: identity card + post grid.
 /// Backed by `ProfileView`, the read-only type that structurally cannot
 /// carry an email or password hash.
+#[tracing::instrument(
+    skip_all,
+    name = "handler::profile",
+    fields(username = tracing::field::Empty)
+)]
 pub async fn get_profile(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     db: web::Data<Box<dyn DatabaseBackend>>,
@@ -28,6 +33,7 @@ pub async fn get_profile(
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
+    tracing::Span::current().record("username", tracing::field::display(&username));
     let viewer = identity
         .as_ref()
         .and_then(|i| i.id().ok())
