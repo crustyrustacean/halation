@@ -98,6 +98,10 @@ fn validate_registration(
 /// GET /register/closed — the "registration is closed" page. Served for
 /// logged-in visitors too (direct navigation is harmless and the page
 /// links back to /login).
+///
+/// `identity` is skipped: actix-identity's `Identity` has no `Debug` impl,
+/// and logging the caller's id is not useful here.
+#[tracing::instrument(skip_all, name = "handler::registration_closed")]
 pub async fn get_registration_closed_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     identity: Option<Identity>,
@@ -121,13 +125,31 @@ pub async fn get_registration_closed_page(
     Ok(html(actix_web::http::StatusCode::OK, body))
 }
 
-#[derive(Debug, Deserialize)]
+// `Debug` is hand-written so the password can never be printed. A
+// `#[derive(Debug)]` here is a live hazard: `#[tracing::instrument]` and
+// `dbg!` both record arguments via `Debug`, and either would write the
+// plaintext password to the log. The `password` field is simply omitted.
+#[derive(Deserialize)]
 pub struct RegisterFormData {
     pub username: String,
     pub email: String,
     pub password: String,
 }
 
+impl std::fmt::Debug for RegisterFormData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisterFormData")
+            .field("username", &self.username)
+            .field("email", &self.email)
+            .finish_non_exhaustive()
+    }
+}
+
+#[tracing::instrument(
+    skip_all,
+    name = "handler::register_page",
+    fields(registration_open = ?registration_open)
+)]
 pub async fn get_register_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     registration_open: web::Data<bool>,
@@ -158,6 +180,15 @@ pub async fn get_register_page(
     Ok(html(actix_web::http::StatusCode::OK, body))
 }
 
+/// `form` is skipped on purpose: `RegisterFormData` derives `Debug`, and
+/// `instrument` records arguments with `Debug` by default — recording it
+/// verbatim would write the plaintext password to the log. Only the
+/// normalized, non-secret parts are recorded, via the `fields(...)` below.
+#[tracing::instrument(
+    skip_all,
+    name = "handler::register",
+    fields(registration_open = ?registration_open, identifier = tracing::field::Empty)
+)]
 pub async fn post_register(
     req: HttpRequest,
     form: web::Form<RegisterFormData>,
@@ -258,10 +289,20 @@ pub async fn post_register(
 // login / logout
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+// See `RegisterFormData`: same reasoning, and the same hand-written
+// `Debug` that refuses to render the password.
+#[derive(Deserialize)]
 pub struct LoginFormData {
     pub identifier: String,
     pub password: String,
+}
+
+impl std::fmt::Debug for LoginFormData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginFormData")
+            .field("identifier", &self.identifier)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +310,7 @@ pub struct LoginQuery {
     pub registered: Option<String>,
 }
 
+#[tracing::instrument(skip_all, name = "handler::login_page")]
 pub async fn get_login_page(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     identity: Option<Identity>,
@@ -299,6 +341,14 @@ pub async fn get_login_page(
     Ok(html(actix_web::http::StatusCode::OK, body))
 }
 
+/// `form` is skipped deliberately: it carries the plaintext password, and
+/// `Debug`-based argument recording would leak it into the log. The
+/// identifier is recorded by hand below, after normalization.
+#[tracing::instrument(
+    skip_all,
+    name = "handler::login",
+    fields(identifier = tracing::field::Empty)
+)]
 pub async fn post_login(
     req: HttpRequest,
     form: web::Form<LoginFormData>,
@@ -308,6 +358,10 @@ pub async fn post_login(
 ) -> Result<HttpResponse, Error> {
     let ip = peer_ip(&req);
     let identifier = form.identifier.trim().to_lowercase();
+    // The identifier is a username or email — account-identifying, but not
+    // a secret, and it is the single most useful field for diagnosing a
+    // failed login. The password never appears.
+    tracing::Span::current().record("identifier", tracing::field::display(&identifier));
 
     // Rate limit per IP + identifier: 5 per 15 minutes, burst 5
     let decision = rate_limiter.check(&format!("login:{ip}:{identifier}"));
@@ -387,6 +441,7 @@ pub async fn post_login(
         .finish())
 }
 
+#[tracing::instrument(skip_all, name = "handler::logout")]
 pub async fn post_logout(req: HttpRequest, identity: Option<Identity>) -> HttpResponse {
     if let Some(identity) = identity {
         identity.logout();
