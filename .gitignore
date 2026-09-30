@@ -1,2 +1,14 @@
-/target
+# halation gitignore settings
+
+# Zed IDE
+.zed
+
+# Rho Coding Agent
+.rho
+logs
+
+# Environment
 .env
+
+# Build artifacts
+/target

@@ -1,9 +1,9 @@
 target
 .git
 tests
-scripts
 .env
 *.db
+xtask
 docker-compose.yml
 CHANGELOG.md
 README.md

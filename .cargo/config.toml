@@ -1,0 +1,5 @@
+# Make `cargo xtask <command>` work from the repository root, the same way it
+# does on a properly set-up xtask workspace. The alias runs the workspace
+# member's binary directly so no build script or extra dependency is needed.
+[alias]
+xtask = "run --quiet --package xtask --"

@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Deliberately dependency-light. This is a build-time tool that must compile
+# instantly and never break the workspace; every dependency is a way for
+# `cargo check` at the repo root to fail for reasons unrelated to the app.
+[dependencies]
