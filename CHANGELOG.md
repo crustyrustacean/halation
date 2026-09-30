@@ -2,6 +2,100 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [Unreleased]
+
+### Removed — manual rotate
+
+Manual rotation is gone. Rotation on upload was the real requirement, and it
+is handled by the pipeline: EXIF orientation is applied at decode time, so a
+photo already has the right orientation the moment it is stored. The button
+on top of that was a second mechanism for the same outcome, and it was never
+actually usable — it only worked on a freshly restarted server.
+
+Removed: the `/fragments/media/{id}/rotate` route, the `MediaRotation` struct,
+three `DatabaseBackend` methods (`media_for_rotation`, `apply_rotation`,
+`load_media_block_for_media`) and their Postgres implementations, the
+`rotate_cw` helper, the `can_rotate` context key, the template row, and the
+CSS.
+
+**If a photo is upside down, it is an upload-pipeline bug, not a missing
+button.** The derivative set is regenerable from the original, so the fix
+path is a re-upload rather than a repair.
+
+### Changed — the photo page is now just the photograph
+
+`/p/{id}` showed the `medium` derivative (640px) and an EXIF metadata table.
+It now shows the `large` derivative (1080px) — the feed already gives a
+glance at `medium`, and the page you click through to is the page you arrived
+at to look at the photograph. `large` is already generated and stored for
+every upload, so this needed no pipeline work.
+
+The EXIF row is gone. EXIF is still read, stored, and asserted on in tests;
+it is simply no longer part of the page. A multi-photo post renders as a
+grid of `large` images, since linking each photo back to the permalink you
+are already on would be circular.
+
+The `DatabaseBackend` trait is three methods shorter as a result.
+
+### Changed — template edits now take effect without a restart
+
+`TeraRenderer` loaded every template once at boot, so editing a template
+appeared to do nothing until you restarted the server. That cost real time
+today: a fixed `data-on:click` was still being served as `data-on-click`
+by a running instance, and it read as "the fix didn't work".
+
+Outside production the renderer now snapshots template mtimes before each
+render and re-reads anything that moved, including additions and deletions.
+In production it is off — a stat per template per render buys nothing when
+nothing should be editing a deployed template.
+
+The engine moved behind an `RwLock` because `Tera::full_reload` needs
+`&mut self` while `render` is `&self` and shared across requests. A failed
+reload keeps the last good template set and warns, rather than turning
+every request into a 500 mid-edit.
+
+### Fixed — every interactive control in the app was inert
+
+The "Load more photos" button, the follow/unfollow button, and the rotate
+control did nothing in a browser, and had since the initial scaffold. No
+server-side test could catch it: the fragments were correct all along.
+
+Two independent faults, both silent — no console error in either case:
+
+- `static/datastar.js` is an ES module (it ends in `export {...}`), but
+  `base.html` loaded it as a classic script. The browser threw
+  `SyntaxError: Unexpected token 'export'` and discarded the entire file.
+  Now `type="module"`.
+- The attribute syntax was wrong for the bundled Datastar v1. It splits a
+  plugin from its key on a **colon** — `data-on:click`, not
+  `data-on-click`. With a hyphen it looks for a plugin named `on-click`,
+  finds none, and drops the attribute without a word. All three templates
+  corrected (`load_more_button`, `follow_button`, `post_media_block`).
+
+The load-more fragment also re-rendered its own `#load-more-zone`
+container, nesting a duplicate `id` into the previous one on every page
+after the first. It now patches the button alone
+(`partials/load_more_button.html`); the zone wrapper stays in
+`load_more.html`.
+
+### Added — `cargo xtask e2e`
+
+Drives a real Chromium over the DevTools Protocol, clicks the real
+load-more button, and exits non-zero if the post count does not move.
+Starts the app itself (memory storage, so it cannot touch real object
+storage) or takes `--url`; `--db` selects a database, `--keep` leaves the
+app running. Dependency-free, like the rest of `xtask`.
+
+This exists because the bug above was invisible to every other test: the
+SSE fragments were well formed, the routes were correct, and only a real
+click in a real browser showed otherwise. `HALATION_E2E_DEBUG=1` prints
+the browser's console, exceptions, and `/fragments/` requests.
+
+Also fixed while building it: `json_field` truncated nested JSON at the
+first `}`; the WebSocket reader took the mask bit from the wrong header
+byte; Chrome 154 omits the port from `webSocketDebuggerUrl`; and
+`Runtime.evaluate` needs `awaitPromise` for async probes.
+
 ## [0.13.0] - 2026-09-24
 
 ### Added — registration close (shareable portfolio mode)
@@ -45,7 +139,7 @@ literal per-user-bucket backend open as a future option.
 83 tests green (37 lib + 40 API + 3 backfill + 3 registration), zero
 warnings on `--all-targets`.
 
-## [0.12.0] - 2026-10-01
+## [0.12.0] - 2026-09-23
 
 ### Changed — relational storage behind a `DatabaseBackend` trait
 

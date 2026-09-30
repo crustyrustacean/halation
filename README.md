@@ -16,7 +16,7 @@ The compose stack is the deployment unit: app + postgres + Caddy
 (automatic HTTPS). On a fresh droplet:
 
 ```sh
-scripts/init_dev_db.sh is NOT needed in production — the app creates
+cargo xtask dev-db is NOT needed in production — the app creates
 and migrates its database on boot.
 ```
 
@@ -29,12 +29,25 @@ and applies migrations on every boot. All you need is the dev Postgres
 container:
 
 ```sh
-scripts/init_dev_db.sh            # first time: creates the container
-cargo run                         # visit http://127.0.0.1:8000
+cargo xtask dev-db            # first time: creates the container
+cargo run                     # visit http://127.0.0.1:8000
 ```
 
-`scripts/init_dev_db.sh --clean` additionally sweeps throwaway test
+`cargo xtask dev-db --clean` additionally sweeps throwaway test
 databases. Tests (`cargo test`) spin up their own throwaway databases
 per test and need the same container running.
+
+Interactive behaviour needs a real browser, so it gets its own check:
+
+```sh
+cargo xtask e2e                # start the app, click load-more, assert
+cargo xtask e2e --url <url>    # drive an already-running instance
+```
+
+It launches Chrome, clicks the feed's load-more button, and fails if the
+post count does not move — the one failure `cargo test` cannot see, since
+the fragments and routes can all be correct while the browser never
+executes the JavaScript. Set `HALATION_E2E_DEBUG=1` to see the browser's
+console output and requests.
 
 `DATABASE_URL` in `.env` points at `localhost:5433` for sqlx-cli.

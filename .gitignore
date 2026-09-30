@@ -12,3 +12,6 @@ logs
 
 # Build artifacts
 /target
+
+# Agent plans
+.plans/
