@@ -4,7 +4,7 @@
 use halation::configuration::{DatabaseSettings, get_configuration};
 use halation::startup::{Application, get_connection_pool};
 use halation::telemetry::{get_subscriber, init_subscriber};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::sync::LazyLock;
 use uuid::Uuid;
@@ -50,9 +50,26 @@ pub async fn spawn_app_with(
 
         c.application.port = 0;
 
+        // --- Hermetic test configuration -------------------------------
+        //
+        // Everything below overrides whatever the surrounding environment
+        // says, so a developer's `.env` or exported `APP_*` variables can
+        // never redirect a test at real infrastructure. This is a second
+        // line of defence: `Application::build` also refuses a remote
+        // storage backend outright when `testing` is set, and fails loudly
+        // rather than silently succeeding against production.
+        c.application.testing = true;
+        c.storage.backend = "memory".to_string();
+        c.storage.r2 = Default::default();
+        c.email.backend = "noop".to_string();
+
         c
     };
     configure(&mut configuration);
+
+    // The per-test closure is a test's own business, but it must not be
+    // able to undo the guarantees above. Re-assert after it runs.
+    assert_test_configuration_is_local(&configuration);
 
     configure_database(&configuration.database).await;
 
@@ -155,8 +172,56 @@ pub async fn register_and_login(
         .join("; ")
 }
 
+/// Fail loudly if anything about this test run could touch real
+/// infrastructure, or if the surrounding environment is a production one.
+///
+/// Two distinct hazards, both observed in practice:
+///
+/// 1. `APP_STORAGE__BACKEND=s3` (plus credentials) leaking in from a `.env`
+///    or an exported variable, which sends test uploads to the live bucket.
+/// 2. `APP_ENVIRONMENT=production` in the shell, which loads
+///    `production.yaml` and can disable registration or point at other
+///    production-only settings — the suite would then be testing the
+///    production configuration while believing it tests the defaults.
+///
+/// This runs before the app boots, so a mistake is a clear error message
+/// rather than a confusing 500 three layers deeper.
+fn assert_test_configuration_is_local(settings: &halation::configuration::Settings) {
+    // 1. Storage must be in-process.
+    assert_eq!(
+        "memory", settings.storage.backend,
+        "tests must not touch real object storage; storage.backend was forced to `memory` \
+         by the harness. If you are seeing this from a per-test `configure` closure, it \
+         must not set storage.backend."
+    );
+    assert!(
+        settings.storage.r2.bucket.is_empty()
+            && settings.storage.r2.endpoint.is_empty()
+            && settings.storage.r2.access_key.expose_secret().is_empty()
+            && settings.storage.r2.secret_key.expose_secret().is_empty(),
+        "tests must not carry R2 credentials; the harness clears them. A populated \
+         r2 section means the environment leaked in."
+    );
+
+    // 2. The environment itself must not be production.
+    let environment = halation::configuration::current_environment();
+    assert_ne!(
+        "production", environment,
+        "APP_ENVIRONMENT=production in the environment: tests would load \
+         production.yaml. Unset it, or export APP_ENVIRONMENT=local."
+    );
+
+    // 3. The database must be a throwaway one, not the real `halation`.
+    let name = &settings.database.database_name;
+    let looks_like_throwaway = Uuid::parse_str(name).is_ok();
+    assert!(
+        looks_like_throwaway,
+        "tests must run against a throwaway database, but database_name is {name:?}. \
+         The harness assigns a UUID; something overwrote it."
+    );
+}
+
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    // Create database
     let maintenance_settings = DatabaseSettings {
         database_name: "postgres".to_string(),
         username: "postgres".to_string(),
@@ -167,7 +232,11 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to connect to Postgres");
     connection
-        .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
+        // Test-database name, generated as a UUID by `spawn_app`.
+        .execute(sqlx::AssertSqlSafe(format!(
+            r#"CREATE DATABASE "{}";"#,
+            config.database_name
+        )))
         .await
         .expect("Failed to create database.");
 

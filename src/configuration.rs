@@ -31,6 +31,13 @@ pub struct ApplicationSettings {
     /// development — existing accounts log in unaffected.
     #[serde(default = "default_registration_open")]
     pub registration_open: bool,
+    /// True when this process is serving a test run. Not a config-file
+    /// setting: the test harness sets it, and `Application::build` uses it
+    /// to refuse a configuration that would reach real infrastructure.
+    /// It is deliberately *not* read from the environment — see
+    /// `assert_no_remote_storage` for why that matters.
+    #[serde(default)]
+    pub testing: bool,
 }
 
 fn default_registration_open() -> bool {
@@ -142,6 +149,57 @@ impl DatabaseSettings {
             .ssl_mode(ssl_mode)
             .database(&self.database_name)
     }
+}
+
+/// The runtime environment name, as resolved by [`get_configuration`].
+/// Defaults to `local` when `APP_ENVIRONMENT` is unset.
+pub fn current_environment() -> String {
+    std::env::var("APP_ENVIRONMENT")
+        .unwrap_or_else(|_| "local".into())
+        .to_lowercase()
+}
+
+/// Storage backends that talk to something outside this process.
+const REMOTE_STORAGE_BACKENDS: [&str; 1] = ["s3"];
+
+/// Refuse a configuration that would let a test run reach a real bucket.
+///
+/// The hazard this guards against is specific and it bit us: a developer's
+/// `.env` on the shell sets `APP_STORAGE__BACKEND=s3` with live R2
+/// credentials, `cargo test` inherits those variables, and the suite starts
+/// writing test JPEGs into the production bucket. Nothing about that is
+/// visible from inside the test — the uploads return 500s from a network
+/// or permission error, and the failure looks like flakiness.
+///
+/// The guard lives here rather than in the test harness on purpose: the
+/// harness is one caller, but `Application::build` is the single choke
+/// point every process passes through, so this also protects a future
+/// integration test, a bench, or a manual `cargo run` with `APP_ENVIRONMENT`
+/// pointed at a test config.
+pub fn assert_no_remote_storage(settings: &Settings) -> Result<(), String> {
+    let backend = settings.storage.backend.to_ascii_lowercase();
+    if !REMOTE_STORAGE_BACKENDS.contains(&backend.as_str()) {
+        return Ok(());
+    }
+
+    if !settings.application.testing {
+        return Ok(());
+    }
+
+    let bucket = if settings.storage.r2.bucket.is_empty() {
+        "(unset)".to_string()
+    } else {
+        settings.storage.r2.bucket.clone()
+    };
+    let environment = current_environment();
+    Err(format!(
+        "refusing to start: storage.backend is {backend:?} while application.testing is \
+         true (test run, APP_ENVIRONMENT={environment}). That would write real objects \
+         into the R2 bucket {bucket:?}. Unset APP_STORAGE__BACKEND (or APP_STORAGE__R2__*) \
+         in the environment, or move the credentials out of the shell: the test harness \
+         sets the backend to `memory` itself, so a `.env` in the repository root is the \
+         usual culprit."
+    ))
 }
 
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {
@@ -280,5 +338,92 @@ mod tests {
         assert_eq!("", settings.storage.r2.access_key.expose_secret());
         // registration_open defaults true when the key is absent entirely
         assert!(settings.application.registration_open);
+        // and `testing` defaults false, so a config file cannot opt itself
+        // into test mode
+        assert!(!settings.application.testing);
+    }
+
+    // --- the hermetic-test guard ------------------------------------------
+
+    fn settings_with(storage_backend: &str, testing: bool) -> Settings {
+        serde_json::from_value(serde_json::json!({
+            "application": {
+                "port": 8000, "host": "127.0.0.1", "base_url": "http://127.0.0.1:8000",
+                "testing": testing
+            },
+            "database": {
+                "host": "127.0.0.1", "port": 5433, "username": "postgres",
+                "password": "password", "database_name": "halation", "require_ssl": false
+            },
+            "storage": {
+                "backend": storage_backend,
+                "r2": {
+                    "bucket": "halation-photos",
+                    "endpoint": "https://example.r2.cloudflarestorage.com",
+                    "access_key": "live-access-key",
+                    "secret_key": "live-secret-key"
+                }
+            }
+        }))
+        .expect("should deserialize")
+    }
+
+    /// The exact failure that motivated the guard: a test run configured
+    /// with live R2 credentials must be refused, loudly, before boot.
+    #[test]
+    fn test_run_with_s3_storage_is_refused() {
+        // Arrange — what a leaked `.env` produces
+        let settings = settings_with("s3", true);
+
+        // Act
+        let result = assert_no_remote_storage(&settings);
+
+        // Assert
+        let message = result.expect_err("a test run must not reach R2");
+        assert!(message.contains("s3"), "names the backend: {message}");
+        assert!(
+            message.contains("halation-photos"),
+            "names the bucket at risk: {message}"
+        );
+        // The message must not echo the credentials back.
+        assert!(!message.contains("live-secret-key"), "{message}");
+    }
+
+    /// The other half: production is *supposed* to use s3, so the guard
+    /// must not fire there. A false positive here would make the deployed
+    /// app unbootable.
+    #[test]
+    fn non_test_run_with_s3_storage_is_allowed() {
+        // Arrange
+        let settings = settings_with("s3", false);
+
+        // Act / Assert
+        assert_no_remote_storage(&settings).expect("production must be allowed to use s3");
+    }
+
+    #[test]
+    fn test_run_with_memory_storage_is_allowed() {
+        // Arrange — the shape the harness actually builds
+        let mut settings = settings_with("memory", true);
+
+        // Act / Assert
+        assert_no_remote_storage(&settings).expect("memory storage is hermetic");
+        // and the credentials are irrelevant once the backend is memory
+        settings.storage.r2.bucket = "halation-photos".to_string();
+        assert_no_remote_storage(&settings).expect("only the backend matters");
+    }
+
+    /// The backend name is compared case-insensitively: `S3` from an env
+    /// var must not slip past the guard.
+    #[test]
+    fn backend_matching_is_case_insensitive() {
+        // Arrange
+        let settings = settings_with("S3", true);
+
+        // Act / Assert
+        assert!(
+            assert_no_remote_storage(&settings).is_err(),
+            "`S3` must be treated the same as `s3`"
+        );
     }
 }
