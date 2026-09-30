@@ -4,6 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" type="text/css" href="/static/screen.css" media="screen">
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <!-- type="module" is REQUIRED, not stylistic. static/datastar.js is an ES
+         module: it ends in `export {...}`. Loaded as a classic script the
+         browser throws "SyntaxError: Unexpected token 'export'" and discards
+         the whole file, so every data-on:* attribute in the app stays inert —
+         silently, with nothing in the console.
+
+         The bundle auto-starts (its plugin registerer walks the DOM from a
+         setTimeout) and exports no `start`, so there is nothing to call.
+
+         Note the attribute syntax: Datastar v1 splits a plugin from its key on
+         a COLON — `data-on:click`, not `data-on-click`. With a hyphen it looks
+         for a plugin literally named "on-click", finds none, and drops the
+         attribute without a word. -->
     <script type="module" src="/static/datastar.js"></script>
     <title>Halation | {{ title }}</title>
 </head>
