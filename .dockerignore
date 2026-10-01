@@ -3,7 +3,12 @@ target
 tests
 .env
 *.db
-xtask
+# NOTE: `xtask` must NOT be ignored here. It is a workspace member, and
+# `cargo chef prepare` runs `cargo metadata`, which has to load every
+# member's manifest — excluding the directory fails the build outright. It is
+# kept out of the *image* instead: the Dockerfile names its binaries
+# explicitly (`--bin halation --bin backfill_media_keys`) and copies only
+# those, so xtask is never compiled or shipped.
 docker-compose.yml
 CHANGELOG.md
 README.md
