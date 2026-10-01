@@ -2,7 +2,7 @@
 
 All notable changes to the Halation project will be documented in this file.
 
-## [Unreleased]
+## [0.14.0] - 2026-09-30
 
 ### Removed — manual rotate
 

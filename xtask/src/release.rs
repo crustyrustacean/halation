@@ -95,6 +95,16 @@ pub fn check(root: &Path) -> Result<(), String> {
 ///
 /// Returns `Some(problem)` only when a disagreement is real; `None` when there
 /// is nothing to compare against (no tags yet) or everything agrees.
+/// The version of the most recent tag, compared against `Cargo.toml`.
+///
+/// Returns `Some(problem)` only when a disagreement is real; `None` when there
+/// is nothing to compare against (no tags yet) or everything agrees.
+///
+/// Tags carry a `v` prefix (`v0.14.0`) while the manifest does not
+/// (`version = "0.14.0"`), so the prefix is stripped before comparing.
+/// Without this, every run reported a false disagreement the moment the
+/// first conventional tag existed — which is exactly why it went unnoticed
+/// for as long as tagging had never been set up at all.
 fn check_version_bump(root: &Path, current: &str) -> Option<String> {
     if !root.join(".git").exists() {
         return None;
@@ -104,7 +114,7 @@ fn check_version_bump(root: &Path, current: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "latest git tag is {tagged} but Cargo.toml says {current} — they should match"
+        "latest git tag is v{tagged} but Cargo.toml says {current} — they should match"
     ))
 }
 
@@ -120,10 +130,9 @@ fn latest_tag(root: &Path) -> Option<String> {
     let text = String::from_utf8(output.stdout).ok()?;
     let text = text.trim();
     if text.is_empty() {
-        None
-    } else {
-        Some(text.to_string())
+        return None;
     }
+    Some(text.strip_prefix('v').unwrap_or(text).to_string())
 }
 
 #[cfg(test)]
