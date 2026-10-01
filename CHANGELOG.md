@@ -45,18 +45,18 @@ CSS.
 button.** The derivative set is regenerable from the original, so the fix
 path is a re-upload rather than a repair.
 
-### Changed — the photo page is now just the photograph
+### Changed — the photo page shows the photograph at full size
 
-`/p/{id}` showed the `medium` derivative (640px) and an EXIF metadata table.
-It now shows the `large` derivative (1080px) — the feed already gives a
-glance at `medium`, and the page you click through to is the page you arrived
-at to look at the photograph. `large` is already generated and stored for
-every upload, so this needed no pipeline work.
+`/p/{id}` showed the `medium` derivative (640px). It now shows the `large`
+derivative (1080px) — the feed already gives a glance at `medium`, and the
+page you click through to is the page you arrived at to look at the
+photograph. `large` is already generated and stored for every upload, so
+this needed no pipeline work.
 
-The EXIF row is gone. EXIF is still read, stored, and asserted on in tests;
-it is simply no longer part of the page. A multi-photo post renders as a
-grid of `large` images, since linking each photo back to the permalink you
-are already on would be circular.
+The EXIF metadata row was also removed here, on the reasoning that the page
+should be "just the photograph". That was wrong, and 0.14.1 puts it back.
+A multi-photo post renders as a grid of `large` images, since linking each
+photo back to the permalink you are already on would be circular.
 
 The `DatabaseBackend` trait is three methods shorter as a result.
 
