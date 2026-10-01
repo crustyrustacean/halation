@@ -51,3 +51,15 @@ executes the JavaScript. Set `HALATION_E2E_DEBUG=1` to see the browser's
 console output and requests.
 
 `DATABASE_URL` in `.env` points at `localhost:5433` for sqlx-cli.
+
+Much of this code was written with AI assistance. To find the places worth
+a second human look, there is a recorded technical-debt baseline:
+
+```sh
+debtmap analyze . --context-providers git_history
+```
+
+Current figures, and what they actually mean, are in
+`docs/DEBT-BASELINE.md`. Read the caveats there before acting on the
+headline number — the majority of it is vendored third-party JavaScript
+that should not be touched.
