@@ -2,6 +2,29 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.14.1] - 2026-09-30
+
+### Restored — the EXIF row on the photo page
+
+The camera metadata (make, model, lens, aperture, shutter, ISO, date taken)
+was removed from `/p/{id}` in 0.14.0, when the photo page was simplified to
+"just the photograph". That was the wrong call: the data is the interesting
+part of a photography site, and it had been on this page since 0.3.0.
+
+No data was lost at any point — `media.exif` is still captured at upload and
+still stored; it only stopped being rendered. Your photos kept their EXIF
+throughout, which is why this was a one-template fix rather than a rebuild.
+
+The row now sits below the caption instead of inside the media block, so it
+reads as a footnote to the photograph. The CSS is unchanged from 0.13.0.
+GPS is still deliberately not rendered; the location chip covers the "where"
+without publishing coordinates to anyone who can view the photo.
+
+The test that pinned the removal is rewritten rather than deleted. It had
+asserted `!body.contains("TestModel")` — a test that asserts *absence* is
+what made the removal look deliberate and would have kept blessing it
+forever.
+
 ## [0.14.0] - 2026-09-30
 
 ### Removed — manual rotate

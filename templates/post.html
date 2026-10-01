@@ -1,10 +1,19 @@
 {% extends "base.html" %}
 
-{# The photo page: the photograph, then the context a photographer actually
-   wants alongside it — where it was taken, what it says, when. The caption
-   and tags are kept because they are the only prose on the site; the EXIF
-   block was dropped deliberately, since the feed is the browsing surface and
-   this is the looking surface. #}
+{# The photo page: the photograph first, then the context a photographer
+   actually wants alongside it — where it was taken, what it says, who took
+   it, and what the camera recorded.
+
+   The EXIF row is back. It was removed in 0.14.0 on the grounds that this
+   page should be "just the photograph", which turned out to be the wrong
+   call: the data was the interesting part for anyone who cares about
+   photography, and it had been on this page since 0.3.0. Nothing was lost
+   when it was removed — `media.exif` is still captured and stored — it just
+   stopped being rendered.
+
+   It sits below the caption rather than inside the media block, so it reads
+   as a footnote to the photograph instead of competing with it. The CSS is
+   unchanged from 0.13.0. #}
 {% block content %}
 <article class="post">
     {% include "partials/post_media_block.html" %}
@@ -13,6 +22,17 @@
         {% if location_name %}<span class="chip chip-inline">{{ location_name }}</span>{% endif %}
         {% if caption %}<p class="caption">{{ caption }}</p>{% endif %}
         {% if hashtags %}<p class="tags">{% for t in hashtags %}<a class="tag" href="/hashtags/{{ t }}">#{{ t }}</a> {% endfor %}</p>{% endif %}
+
+        {% for m in media %}{% if m.exif %}
+        <div class="meta">
+            {% if m.exif.make %}<span>{{ m.exif.make }}{% if m.exif.model %} {{ m.exif.model }}{% endif %}</span>{% endif %}
+            {% if m.exif.focal_length %}<span>{{ m.exif.focal_length }}</span>{% endif %}
+            {% if m.exif.f_number %}<span>{{ m.exif.f_number }}</span>{% endif %}
+            {% if m.exif.exposure_time %}<span>{{ m.exif.exposure_time }}s</span>{% endif %}
+            {% if m.exif.iso %}<span>ISO {{ m.exif.iso }}</span>{% endif %}
+            {% if m.exif.date_time_original %}<span>{{ m.exif.date_time_original }}</span>{% endif %}
+        </div>
+        {% endif %}{% endfor %}
     </div>
     <footer class="post-foot"><span>by <a href="/u/{{ username }}">{{ username }}</a></span><span>{{ created_at_display }}</span></footer>
 </article>

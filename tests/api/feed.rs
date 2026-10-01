@@ -296,7 +296,7 @@ async fn profile_page_renders_grid_and_counts() {
 }
 
 #[tokio::test]
-async fn permalink_shows_the_photo_and_not_the_exif_row() {
+async fn permalink_shows_the_photo_with_its_exif_row() {
     // Arrange — upload a JPEG carrying EXIF (fixture committed for this phase)
     let app = spawn_app().await;
     let cookie = register_and_login(&app, "jeff", "jeff@example.com", "hunter2hunter2").await;
@@ -333,8 +333,10 @@ async fn permalink_shows_the_photo_and_not_the_exif_row() {
         .expect("Failed to execute request.");
 
     // Assert — the photo page is the looking surface: the photograph at full
-    // size, the caption, the owner. The camera metadata row was deliberately
-    // removed; EXIF is still captured, stored, and asserted on elsewhere.
+    // size, the caption, the owner, and the camera metadata. The EXIF row was
+    // removed in 0.14.0 and restored — `media.exif` was never discarded, it
+    // just stopped being rendered, which is exactly the sort of change a
+    // test asserting absence would bless forever.
     assert_eq!(200, page.status().as_u16());
     let body = page.text().await.unwrap();
     assert!(body.contains("with exif"), "the caption renders");
@@ -344,8 +346,6 @@ async fn permalink_shows_the_photo_and_not_the_exif_row() {
         body.contains("/large"),
         "the photo page shows the large derivative"
     );
-    assert!(
-        !body.contains("TestModel"),
-        "the EXIF row was removed from the photo page"
-    );
+    assert!(body.contains("TestMake"), "the camera make renders");
+    assert!(body.contains("TestModel"), "the camera model renders");
 }
