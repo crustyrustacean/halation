@@ -305,3 +305,72 @@ the Cloudflare R2 dashboard once the site verifies clean.
   cover the rest.
 - **Container names** under this compose project: `halation-app-1`,
   `halation-db-1`, `halation-caddy-1`.
+
+### If the app crash-loops with "previously applied but has been modified"
+
+This is not a data problem and nothing is corrupted. It happens when the
+sqlx major version changes, because **sqlx 0.9 changed the migration
+checksum algorithm** (SHA-256 → SHA-384). Every checksum recorded by an
+older sqlx then reads as "modified" to the new binary, and the app refuses
+to boot rather than guessing.
+
+You hit this deploying 0.14.0, which carried the 0.8 → 0.9 upgrade. Tell-tale
+sign: `SELECT length(checksum) FROM _sqlx_migrations` is 32 for a database
+written by sqlx 0.8, 48 by 0.9.
+
+**Roll back first if you have not already.** Get the site back on the old
+image before you diagnose anything:
+
+```bash
+cd /opt/halation && docker compose down
+docker tag <previous-image-id> halation:latest   # e.g. 7a37fc19ce91
+docker compose up -d
+```
+
+Then, deliberately, with a backup taken:
+
+```sh
+# 1. Back up. Do this even though it feels like a formality.
+docker exec halation-db-1 pg_dump -U postgres -d halation > /opt/halation/backups/pre-$(date +%Y%m%d-%H%M%S).sql
+
+# 2. Get the checksums the NEW sqlx expects, from a scratch database.
+#    Do not compute these yourself — let the new binary produce them.
+docker run -d --name ckp3 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=chk postgres:17
+IP=$(docker inspect ckp3 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+docker run --rm --platform linux/amd64 --entrypoint sh \
+  -e APP_DATABASE__HOST=$IP -e APP_DATABASE__PORT=5432 \
+  -e APP_DATABASE__USERNAME=postgres -e APP_DATABASE__PASSWORD=postgres \
+  -e APP_DATABASE__DATABASE_NAME=chk -e APP_STORAGE__BACKEND=memory \
+  halation:latest -c '/app/halation & sleep 25; kill %1'
+docker exec ckp3 psql -U postgres -d chk -tAc \
+  "SELECT version||E'\t'||encode(checksum,'hex') FROM _sqlx_migrations ORDER BY version;" \
+  > /tmp/new.tsv
+
+# 3. PROVE the migrations produce the schema you already have, before
+#    touching anything. This is the step that rules out a migration file
+#    having been edited after it was applied — otherwise you would be
+#    papering over real schema drift instead of fixing a checksum format.
+docker exec ckp3 pg_dump -U postgres -d chk --schema-only --no-owner --no-privileges \
+  | grep -v restrict | sort > /tmp/schema_new.txt
+docker exec halation-db-1 pg_dump -U postgres -d halation --schema-only --no-owner --no-privileges \
+  | grep -v restrict | sort > /tmp/schema_prod.txt
+diff /tmp/schema_new.txt /tmp/schema_prod.txt && echo "IDENTICAL - safe to proceed"
+
+# 4. Rewrite the checksums, guarded, in one transaction. The guard aborts
+#    unless there are exactly the expected migrations, all successful, all
+#    the same length — so a surprise rolls back rather than half-applying.
+#    (Generate the UPDATE lines from /tmp/new.tsv; 8 rows for this schema.)
+docker exec -i halation-db-1 psql -U postgres -d halation -v ON_ERROR_STOP=1 -1 -f - < fix.sql
+
+docker rm -f ckp3
+```
+
+**Do not skip step 3.** The whole reason this is safe is that the fresh
+database and production agree structurally. Without that check, a modified
+migration file would produce a "checksum mismatch" that looks identical to
+a version-boundary mismatch, and rewriting the checksums would make a
+genuine schema difference permanent and invisible.
+
+After the rewrite, `docker compose up -d` boots normally. This is a
+one-time cost per sqlx major version — after 0.9 is the only version in
+play it cannot recur.

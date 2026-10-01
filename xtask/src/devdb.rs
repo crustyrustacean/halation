@@ -150,7 +150,7 @@ fn ensure_container(db: &DevDb) -> Result<(), String> {
     match container_state(db)? {
         state if state == "running" => {
             println!("Container '{}' is running.", db.container);
-            Ok(())
+            ensure_restart_policy(db)
         }
         state if state == "stopped" => {
             println!("Starting existing container '{}'...", db.container);
@@ -163,6 +163,12 @@ fn ensure_container(db: &DevDb) -> Result<(), String> {
                 "-d",
                 "--name",
                 &db.container,
+                // Survive Docker Desktop quitting and restarting. Without
+                // this the dev database stops every time the daemon does,
+                // and the next `cargo test` fails at connect — which looks
+                // like a test failure rather than a stopped container.
+                "--restart",
+                "unless-stopped",
                 "-e",
                 &format!("POSTGRES_USER={}", db.user),
                 "-e",
@@ -181,6 +187,35 @@ fn ensure_container(db: &DevDb) -> Result<(), String> {
             ])
         }
     }
+}
+
+/// Bring an already-created container up to the current restart policy.
+///
+/// `--restart` cannot be changed on an existing container, so a container
+/// created before this was added keeps its old policy forever. This updates
+/// it in place, and is a no-op once the policy already matches.
+fn ensure_restart_policy(db: &DevDb) -> Result<(), String> {
+    let current = std::process::Command::new("docker")
+        .args([
+            "inspect",
+            "--format",
+            "{{.HostConfig.RestartPolicy.Name}}",
+            &db.container,
+        ])
+        .output()
+        .map_err(|e| format!("could not inspect the container: {e}"))?;
+    if !current.status.success() {
+        return Ok(());
+    }
+    let policy = String::from_utf8_lossy(&current.stdout).trim().to_string();
+    if policy == "unless-stopped" {
+        return Ok(());
+    }
+    println!(
+        "Updating restart policy on '{}' from '{}' to 'unless-stopped'.",
+        db.container, policy
+    );
+    run_docker(&["update", "--restart", "unless-stopped", &db.container])
 }
 
 /// Probe with a real query over TCP.
