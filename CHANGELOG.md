@@ -2,7 +2,7 @@
 
 All notable changes to the Halation project will be documented in this file.
 
-## [Unreleased]
+## [0.14.2] - 2026-10-02
 
 ### Fixed — rate limiting keyed on the proxy's address
 
