@@ -38,7 +38,34 @@ pub struct ApplicationSettings {
     /// `assert_no_remote_storage` for why that matters.
     #[serde(default)]
     pub testing: bool,
+    /// Is this process behind a reverse proxy that sets `X-Forwarded-For`?
+    ///
+    /// Off by default, and deliberately not inferred from the environment.
+    /// When off, `client_ip` uses the socket address, which behind a proxy
+    /// is the proxy's — shared by every visitor, and therefore useless as a
+    /// rate-limit key. When on, the *last* `X-Forwarded-For` entry is used,
+    /// since that is the address the trusted hop observed.
+    ///
+    /// Set it only when a proxy really is in front and really does overwrite
+    /// the header. If a client can set the header directly, every visitor
+    /// gets their own forged rate-limit bucket.
+    #[serde(default)]
+    pub trusted_proxy: bool,
 }
+
+/// `trusted_proxy` as an Actix extractor target.
+///
+/// Actix keys `app_data` by the *type* of the value, so two independent
+/// `web::Data<bool>` entries are indistinguishable: registering a second one
+/// overwrites the first, and whichever handler still asks for `Data<bool>`
+/// silently receives the other's value. That is not hypothetical — adding
+/// this as a bare `bool` made `/register` start reading `trusted_proxy`
+/// (false) and 303 every visitor to `/register/closed`.
+///
+/// A newtype gives it a distinct `TypeId`. Prefer registering a whole
+/// settings struct over adding more bare scalars here.
+#[derive(Clone, Copy, Debug)]
+pub struct TrustedProxy(pub bool);
 
 fn default_registration_open() -> bool {
     true

@@ -159,6 +159,9 @@ async fn run(
 
     let rate_limiter = web::Data::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);
     let registration_open = web::Data::new(configuration.application.registration_open);
+    let trusted_proxy = web::Data::new(crate::configuration::TrustedProxy(
+        configuration.application.trusted_proxy,
+    ));
     let geocoder = web::Data::new(Geocoder::new(
         configuration.geocode.enabled,
         configuration.geocode.base_url.clone(),
@@ -250,6 +253,7 @@ async fn run(
             .app_data(storage_backend.clone())
             .app_data(rate_limiter.clone())
             .app_data(registration_open.clone())
+            .app_data(trusted_proxy.clone())
             .app_data(geocoder.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()

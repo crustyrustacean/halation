@@ -3,5 +3,14 @@ application:
   # Registration is closed while Halation is under active development —
   # flip to true (or APP_APPLICATION__REGISTRATION_OPEN=true) to reopen.
   registration_open: false
+  # Caddy reverse-proxies this service, so the socket peer is always Caddy
+  # and rate limiting would otherwise key on one address shared by every
+  # visitor in the world. Caddy overwrites X-Forwarded-For, so the last
+  # entry in it is the address it actually observed.
+  #
+  # Only set this when a proxy really is in front and really does overwrite
+  # the header. If a client can set it directly, every visitor gets their own
+  # forged rate-limit bucket.
+  trusted_proxy: true
 database:
   require_ssl: true

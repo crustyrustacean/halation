@@ -2,6 +2,7 @@
 
 // dependencies
 use crate::authentication::{NewUser, UserStoreError, hash_password, verify_password};
+use crate::configuration::TrustedProxy;
 use crate::database::DatabaseBackend;
 use crate::services::RateLimiter;
 use crate::template::TemplateRenderer;
@@ -43,10 +44,62 @@ fn html(status: actix_web::http::StatusCode, body: String) -> HttpResponse {
         .body(body)
 }
 
-fn peer_ip(req: &HttpRequest) -> String {
-    req.peer_addr()
+/// The address to key rate limiting on.
+///
+/// Behind a reverse proxy the socket peer is always the proxy, so
+/// `peer_addr()` alone gives one shared bucket for every visitor. That is
+/// what this did until it was fixed: the login limiter keyed on Caddy's
+/// address, making it a global throttle that unlimited attempts from any
+/// source would trip while protecting nothing.
+///
+/// `X-Forwarded-For` is only consulted when `application.trusted_proxy` is
+/// set, and only its **last** entry is used.
+///
+/// That direction is deliberate, and the opposite of what the header looks
+/// like it wants. A proxy appends the address it observed to the end of the
+/// chain, so with exactly one trusted hop the last entry is the one the
+/// proxy itself saw. Taking the *first* entry — which is what actix's own
+/// `realip_remote_addr` does — takes the leftmost value, which is the one a
+/// client controls and can set to anything.
+///
+/// With no trusted proxy configured there is nothing to vouch for the
+/// header, so it is ignored entirely and the socket address is used. An
+/// unset value therefore cannot be turned into a spoofable one.
+///
+/// Unparseable values fall back to the socket address rather than becoming
+/// a shared literal like `"unknown"`, which would collapse every malformed
+/// header into one bucket — the same failure mode as the original bug.
+fn client_ip(req: &HttpRequest, trusted_proxy: bool) -> String {
+    let socket = req
+        .peer_addr()
         .map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "unknown".into())
+        .unwrap_or_default();
+
+    let from_socket = || {
+        if socket.is_empty() {
+            "unknown".to_string()
+        } else {
+            socket.clone()
+        }
+    };
+
+    if !trusted_proxy {
+        return from_socket();
+    }
+
+    req.headers()
+        .get("X-Forwarded-For")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next_back())
+        .map(str::trim)
+        .and_then(|v| {
+            v.trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<std::net::IpAddr>()
+                .ok()
+        })
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(from_socket)
 }
 
 /// Normalize and validate registration input. Returns the stored,
@@ -196,6 +249,7 @@ pub async fn post_register(
     db: web::Data<Box<dyn DatabaseBackend>>,
     rate_limiter: web::Data<RateLimiter>,
     registration_open: web::Data<bool>,
+    trusted_proxy: web::Data<TrustedProxy>,
 ) -> Result<HttpResponse, Error> {
     // Registration closed: refuse before burning rate-limit budget or
     // touching the database. A 303 to the closed page keeps no-JS
@@ -207,7 +261,7 @@ pub async fn post_register(
     }
 
     // Rate limit per IP: 5 per 15 minutes, burst 5
-    let decision = rate_limiter.check(&format!("register:{}", peer_ip(&req)));
+    let decision = rate_limiter.check(&format!("register:{}", client_ip(&req, trusted_proxy.0)));
     if !decision.allowed {
         let body = render_page(
             templates.get_ref().as_ref(),
@@ -355,8 +409,9 @@ pub async fn post_login(
     templates: web::Data<Box<dyn TemplateRenderer>>,
     db: web::Data<Box<dyn DatabaseBackend>>,
     rate_limiter: web::Data<RateLimiter>,
+    trusted_proxy: web::Data<TrustedProxy>,
 ) -> Result<HttpResponse, Error> {
-    let ip = peer_ip(&req);
+    let ip = client_ip(&req, trusted_proxy.0);
     let identifier = form.identifier.trim().to_lowercase();
     // The identifier is a username or email — account-identifying, but not
     // a secret, and it is the single most useful field for diagnosing a
@@ -456,6 +511,61 @@ pub async fn post_logout(req: HttpRequest, identity: Option<Identity>) -> HttpRe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The parsing half of `client_ip`, exercised directly. The socket side
+    /// needs a real `HttpRequest`, so these tests pin the part that carries
+    /// the security argument: which end of `X-Forwarded-For` is trusted, and
+    /// what happens to a header nobody should be able to set.
+    mod forwarded_for {
+        /// The last entry, mirroring `client_ip`'s `next_back()`.
+        fn last_entry(header: &str) -> Option<&str> {
+            header.split(',').next_back().map(str::trim)
+        }
+
+        #[test]
+        fn the_last_entry_is_the_proxy_observed_address() {
+            // A proxy appends what it saw, so the tail is the trustworthy end.
+            assert_eq!(last_entry("203.0.113.9"), Some("203.0.113.9"));
+            assert_eq!(
+                last_entry("1.1.1.1, 2.2.2.2, 203.0.113.9"),
+                Some("203.0.113.9")
+            );
+        }
+
+        #[test]
+        fn a_client_supplied_prefix_is_not_where_we_look() {
+            // This is the whole reason `client_ip` does NOT use the first
+            // entry, which is what actix's `realip_remote_addr` takes.
+            let forged = "6.6.6.6, 203.0.113.9";
+            assert_eq!(forged.split(',').next().map(str::trim), Some("6.6.6.6"));
+            assert_eq!(last_entry(forged), Some("203.0.113.9"));
+        }
+
+        #[test]
+        fn ipv6_and_bracketed_forms_parse() {
+            assert!("2001:db8::1".parse::<std::net::IpAddr>().is_ok());
+            assert!(
+                "[2001:db8::1]"
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<std::net::IpAddr>()
+                    .is_ok()
+            );
+        }
+
+        #[test]
+        fn a_garbage_header_yields_none_rather_than_a_shared_bucket() {
+            // Returning "unknown" for every malformed header would collapse
+            // them into one rate-limit key — the original bug, reintroduced.
+            for bad in ["not-an-ip", "999.999.999.999", "", "   "] {
+                assert_eq!(
+                    bad.trim().parse::<std::net::IpAddr>().ok(),
+                    None,
+                    "{bad:?} should not parse as an address"
+                );
+            }
+        }
+    }
 
     #[test]
     fn valid_registration_passes_and_normalizes() {

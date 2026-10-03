@@ -2,6 +2,38 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed — rate limiting keyed on the proxy's address
+
+`peer_ip()` read the socket peer address. Behind Caddy that is always Caddy,
+so the login limiter's key was one address shared by **every visitor in the
+world**. It was therefore a global throttle: unlimited attempts from any
+single source were permitted, and one noisy client could lock everyone else
+out of logging in. Same for registration.
+
+`client_ip()` now consults `X-Forwarded-For` when
+`application.trusted_proxy` is set, and `production.yaml` sets it. The
+**last** entry is used, deliberately: a proxy appends the address it
+observed, so the tail is what the trusted hop actually saw. Taking the
+first entry — which is what Actix's `realip_remote_addr` does, and what
+`tracing-actix-web` logs as `http.client_ip` — takes the leftmost value,
+which is the one a client can set to anything. Unparseable values fall back
+to the socket address rather than a shared literal.
+
+### Fixed — an Actix `app_data` type collision
+
+Registering the new flag as a bare `web::Data<bool>` overwrote the existing
+`registration_open` one: Actix keys `app_data` by type, so two
+indistinguishable `Data<bool>` values collide and handlers asking for
+`Data<bool>` silently receive the wrong one. Every `/register` request
+started reading `trusted_proxy` (false) and 303-ed to `/register/closed`
+with registration fully open.
+
+Resolved with a `TrustedProxy` newtype, which has its own `TypeId`.
+`registration_flag_and_trusted_proxy_flag_do_not_collide` pins the pairing
+from both directions.
+
 ## [0.14.1] - 2026-09-30
 
 ### Restored — the EXIF row on the photo page

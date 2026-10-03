@@ -170,3 +170,61 @@ async fn closed_registration_refuses_posts_without_creating_accounts() {
         .unwrap();
     assert_eq!(0, count, "no user row for the refused registration");
 }
+
+/// Actix keys `app_data` by the *type* of the stored value, so two
+/// independent `web::Data<bool>` registrations are indistinguishable — the
+/// second silently replaces the first and handlers still asking for
+/// `Data<bool>` receive the wrong value.
+///
+/// Registering `trusted_proxy` as a bare `bool` did exactly that: it
+/// overwrote `registration_open`, and every `/register` request started
+/// reading `trusted_proxy` (false), 303-ing to `/register/closed` with
+/// registration fully open.
+///
+/// The fix is the `TrustedProxy` newtype — a distinct `TypeId`. This test
+/// pins the collision from both directions: each flag must still be
+/// readable independently, and neither may leak into the other.
+#[tokio::test]
+async fn registration_flag_and_trusted_proxy_flag_do_not_collide() {
+    // Arrange — registration closed, trusted proxy on. These are the two
+    // configurations that are indistinguishable as a bare `bool`.
+    let app = spawn_app_with(Box::new(|c| {
+        c.application.registration_open = false;
+        c.application.trusted_proxy = true;
+    }))
+    .await;
+
+    // Act
+    let register = app
+        .api_client
+        .get(format!("{}/register", app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    // Assert — `registration_open=false` is what must drive this, and the
+    // fact that `trusted_proxy=true` is set is what would have leaked.
+    assert_eq!(
+        303,
+        register.status().as_u16(),
+        "registration_open must still read false when trusted_proxy is true"
+    );
+
+    // And the reverse pairing: both true must leave registration open.
+    let app = spawn_app_with(Box::new(|c| {
+        c.application.registration_open = true;
+        c.application.trusted_proxy = true;
+    }))
+    .await;
+    let register = app
+        .api_client
+        .get(format!("{}/register", app.address))
+        .send()
+        .await
+        .expect("Failed to execute request.");
+    assert_eq!(
+        200,
+        register.status().as_u16(),
+        "trusted_proxy=true must not be mistaken for registration_open"
+    );
+}
