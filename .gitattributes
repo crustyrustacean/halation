@@ -1,0 +1,3 @@
+# Ensure SQL migrations always use LF line endings across Windows and Linux
+# so SQLx computes identical migration checksums regardless of build host.
+*.sql text eol=lf
