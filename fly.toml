@@ -2,7 +2,7 @@
 # See docs/DEPLOYMENT.md for first-time setup, volume creation, R2/Tigris
 # secrets, and custom domain configuration.
 
-app = "halation"
+app = "halation-photos-server"
 primary_region = "ord"
 
 [build]
