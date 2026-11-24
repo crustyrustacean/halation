@@ -48,12 +48,13 @@ async fn permalink_without_caption_renders() {
         .fetch_one(&app.db_pool)
         .await
         .unwrap();
-    let post_id: Uuid =
-        sqlx::query_scalar("INSERT INTO posts (user_id, caption) VALUES ($1, NULL) RETURNING id")
-            .bind(user_id)
-            .fetch_one(&app.db_pool)
-            .await
-            .unwrap();
+    let post_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO posts (id, user_id, caption) VALUES (?1, ?2, NULL)")
+        .bind(post_id)
+        .bind(user_id)
+        .execute(&app.db_pool)
+        .await
+        .unwrap();
 
     // Act
     let response = app

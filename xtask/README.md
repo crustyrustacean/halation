@@ -44,38 +44,24 @@ explicitly.
 
 ### `dev-db [--clean]`
 
-Ensures the dev Postgres container (`halation-db-1`, postgres:17, port 5433)
-and the `halation` database exist. `--clean` also drops the throwaway
-UUID-named databases `cargo test` leaves behind.
+Ensures the local SQLite `data/` directory exists (no Docker container needed;
+the app creates and migrates `data/halation.db` on boot). `--clean` deletes
+`data/halation.db` (plus `-wal`/`-shm` sidecars) and sweeps any leftover temp
+test database files.
 
-Migrations are deliberately **not** applied here — the app self-migrates on
-boot, and applying them twice breaks `cargo run` with
-`relation users already exists`.
+### `deploy [--dry-run] [--yes] [--url=…]`
 
-This replaces both `scripts/init_dev_db.sh` and `scripts/init_db.ps1`, which
-had drifted into a genuine footgun: a `.ps1` with no `param()` block silently
-discarded `-Clean`, exiting 0 having done nothing at all.
+Prints the Fly.io deploy plan, and **refuses to run without `--yes`**. With
+`--yes`, it checks that `fly` is installed, runs `fly deploy` and `fly status`,
+and reminds you to verify `/api/v1/health`:
 
-### `deploy [--dry-run] [--yes] [--host=…]`
+1. `fly deploy` (builds the `Dockerfile` remotely on Fly's x86-64 builders);
+2. `fly status` (confirm machines are started and passing `/health_check`);
+3. read the *serving* version from `/api/v1/health` to confirm it matches
+   `Cargo.toml` and both `database` and `storage` report `"ok"`.
 
-Prints the droplet plan, and **refuses to run without `--yes`**. The plan
-deliberately includes the verification steps that get skipped when you're
-tired:
-
-1. build `--platform linux/amd64` (arm64 crash-loops on the x86-64 droplet);
-2. transfer the image, then **compare image IDs** across machines;
-3. `docker compose up -d`;
-4. read the *serving* version from `/api/v1/health` — `compose up -d` with an
-   unchanged image is a silent no-op, and the schema can run ahead of the
-   container, so "the schema is right" proves nothing;
-5. re-verify the image ID on the droplet.
-
-Host defaults to `root@167.99.176.197`, overridable via `--host=` or
-`HALATION_DEPLOY_HOST`.
-
-> **Note:** steps are currently *printed*; the live execution path is
-> deliberately not wired up yet. Treat `deploy --yes` as a checklist that
-> always shows you the plan, and run the commands yourself until it's finished.
+Health URL defaults to `https://halation.photos/api/v1/health`, overridable via
+`--url=` or `HALATION_HEALTH_URL`.
 
 ## Scope
 

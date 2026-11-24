@@ -134,7 +134,7 @@ fn spawn_app(root: &Path, port: u16, db: Option<&str>) -> Result<Child, String> 
         .env("APP_ENVIRONMENT", "local")
         .env("APP_APPLICATION__PORT", port.to_string());
     if let Some(db) = db {
-        cmd.env("APP_DATABASE__DATABASE_NAME", db);
+        cmd.env("APP_DATABASE__PATH", db);
     }
     cmd.stdout(Stdio::null())
         .stderr(Stdio::inherit())
@@ -162,8 +162,7 @@ fn wait_for_health(base: &str, timeout: Duration) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(500));
     }
     Err(format!(
-        "the app never became healthy within {timeout:?} (last: {last}). \
-         Is the dev database up? Try `cargo xtask dev-db`."
+        "the app never became healthy within {timeout:?} (last: {last})."
     ))
 }
 

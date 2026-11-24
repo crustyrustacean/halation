@@ -1,0 +1,15 @@
+# Local development and test overrides.
+# Loaded with `.allow_secrets()` so local dev and hermetic tests work out of
+# the box without setting environment variables.
+
+[application]
+host = "127.0.0.1"
+base_url = "http://127.0.0.1"
+
+[database]
+path = "data/halation.db"
+
+[secrets]
+# Dev-only signing key. Production refuses to boot with this key and requires
+# APP_SECRETS__SESSION_SIGNING_KEY (>= 64 random bytes).
+session_signing_key = "dev-only-key-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

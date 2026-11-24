@@ -1,28 +1,69 @@
-// src/database/postgres.rs
+// src/database/sqlite.rs
 
 use crate::authentication::{NewUser, User, UserStoreError};
+use crate::configuration::DatabaseSettings;
 use crate::database::{DatabaseBackend, DatabaseError};
 use crate::follows::AccountSummary;
 use crate::posts::{
     CardMedia, PostCard, PostMediaView, PostPage, ProfileThumb, ProfileView, parse_hashtags,
 };
 use crate::services::media::StoredMedia;
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use uuid::Uuid;
 
-/// The real backend: every SQL statement in the application lives in this
+/// The SQLite backend: every SQL statement in the application lives in this
 /// file (plus the actix session store, which is infrastructure rather
 /// than domain storage).
-pub struct PostgresDatabase {
-    pool: PgPool,
+pub struct SqliteDatabase {
+    pool: SqlitePool,
 }
 
-impl PostgresDatabase {
-    pub fn new(pool: PgPool) -> Self {
+impl SqliteDatabase {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    /// Ensure the parent directory exists, open the SQLite pool, and apply all
+    /// embedded migrations.
+    pub async fn connect(settings: &DatabaseSettings) -> Result<Self, anyhow::Error> {
+        if let Some(path) = settings.file_path()
+            && let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory {} for SQLite database",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let max_connections = if settings.is_in_memory() {
+            1
+        } else {
+            settings.max_connections.unwrap_or(5)
+        };
+        let pool = SqlitePoolOptions::new()
+            .max_connections(max_connections)
+            .connect_with(settings.connect_options())
+            .await
+            .with_context(|| format!("Failed to connect to SQLite at {:?}", settings.path))?;
+
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .context("Failed to run database migrations")?;
+        tracing::info!(path = %settings.path, "database ready; migrations up to date");
+
+        Ok(Self { pool })
+    }
+
+    pub fn pool(&self) -> SqlitePool {
+        self.pool.clone()
     }
 }
 
@@ -54,9 +95,8 @@ type MediaVersionRow = (Uuid, Uuid, i32);
 type TagRow = (Uuid, String);
 
 #[async_trait]
-impl DatabaseBackend for PostgresDatabase {
-    /// A stat against nothing proves connectivity: any row answers, so a
-    /// bare `SELECT 1` is the whole probe.
+impl DatabaseBackend for SqliteDatabase {
+    /// A bare `SELECT 1` proves the pool can query SQLite.
     async fn ping(&self) -> Result<(), DatabaseError> {
         sqlx::query_scalar::<_, i32>("SELECT 1")
             .fetch_one(&self.pool)
@@ -70,34 +110,36 @@ impl DatabaseBackend for PostgresDatabase {
     // ------------------------------------------------------------------
 
     async fn insert_user(&self, new_user: NewUser) -> Result<User, UserStoreError> {
-        // A literal, not `format!` — the only interpolation was a
-        // compile-time constant column list. sqlx 0.9's `SqlSafeStr` bound
-        // refuses owned strings so that dynamic SQL is always a deliberate,
-        // reviewable choice; here it is not dynamic at all.
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+
         sqlx::query_as::<_, User>(
-            "INSERT INTO users (username, email, password_hash)
-             VALUES ($1, $2, $3)
-             RETURNING id, username::text AS username, email::text AS email, password_hash,
+            "INSERT INTO users (id, username, email, password_hash, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             RETURNING id, username, email, password_hash,
                        display_name, bio, created_at, updated_at, deleted_at",
         )
+        .bind(id)
         .bind(&new_user.username)
         .bind(&new_user.email)
         .bind(new_user.password_hash.expose())
+        .bind(now)
+        .bind(now)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
-            match e
-                .as_database_error()
-                .and_then(|db| db.constraint().map(String::from))
+            if let Some(db) = e.as_database_error()
+                && db.is_unique_violation()
             {
-                Some(constraint) if constraint == "users_username_live_idx" => {
-                    UserStoreError::DuplicateUsername
+                let msg = db.message();
+                if msg.contains("users.username") || msg.contains("users_username_live_idx") {
+                    return UserStoreError::DuplicateUsername;
                 }
-                Some(constraint) if constraint == "users_email_live_idx" => {
-                    UserStoreError::DuplicateEmail
+                if msg.contains("users.email") || msg.contains("users_email_live_idx") {
+                    return UserStoreError::DuplicateEmail;
                 }
-                _ => UserStoreError::Operation(anyhow!("Failed to insert user: {e}")),
             }
+            UserStoreError::Operation(anyhow!("Failed to insert user: {e}"))
         })
     }
 
@@ -106,10 +148,10 @@ impl DatabaseBackend for PostgresDatabase {
         identifier: &str,
     ) -> Result<Option<User>, DatabaseError> {
         let user = sqlx::query_as::<_, User>(
-            "SELECT id, username::text AS username, email::text AS email, password_hash,
+            "SELECT id, username, email, password_hash,
                     display_name, bio, created_at, updated_at, deleted_at
              FROM users
-             WHERE (username = $1 OR email = $1) AND deleted_at IS NULL
+             WHERE (username = ?1 OR email = ?1) AND deleted_at IS NULL
              LIMIT 1",
         )
         .bind(identifier)
@@ -126,7 +168,7 @@ impl DatabaseBackend for PostgresDatabase {
         &self,
         username: &str,
     ) -> Result<Option<Uuid>, DatabaseError> {
-        sqlx::query_scalar("SELECT id FROM users WHERE username = $1 AND deleted_at IS NULL")
+        sqlx::query_scalar("SELECT id FROM users WHERE username = ?1 AND deleted_at IS NULL")
             .bind(username)
             .fetch_optional(&self.pool)
             .await
@@ -139,11 +181,12 @@ impl DatabaseBackend for PostgresDatabase {
 
     async fn follow(&self, follower_id: Uuid, followee_id: Uuid) -> Result<(), DatabaseError> {
         sqlx::query(
-            "INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2)
+            "INSERT INTO follows (follower_id, followee_id, created_at) VALUES (?1, ?2, ?3)
              ON CONFLICT DO NOTHING",
         )
         .bind(follower_id)
         .bind(followee_id)
+        .bind(Utc::now())
         .execute(&self.pool)
         .await
         .map_err(|e| DatabaseError::Operation(anyhow!("Failed to follow: {e}")))?;
@@ -151,7 +194,7 @@ impl DatabaseBackend for PostgresDatabase {
     }
 
     async fn unfollow(&self, follower_id: Uuid, followee_id: Uuid) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2")
+        sqlx::query("DELETE FROM follows WHERE follower_id = ?1 AND followee_id = ?2")
             .bind(follower_id)
             .bind(followee_id)
             .execute(&self.pool)
@@ -166,7 +209,7 @@ impl DatabaseBackend for PostgresDatabase {
         followee_id: Uuid,
     ) -> Result<bool, DatabaseError> {
         let follows: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2)",
+            "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = ?1 AND followee_id = ?2)",
         )
         .bind(follower_id)
         .bind(followee_id)
@@ -177,7 +220,7 @@ impl DatabaseBackend for PostgresDatabase {
     }
 
     async fn count_followers(&self, user_id: Uuid) -> Result<i64, DatabaseError> {
-        sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE followee_id = $1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE followee_id = ?1")
             .bind(user_id)
             .fetch_one(&self.pool)
             .await
@@ -185,7 +228,7 @@ impl DatabaseBackend for PostgresDatabase {
     }
 
     async fn count_following(&self, user_id: Uuid) -> Result<i64, DatabaseError> {
-        sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE follower_id = ?1")
             .bind(user_id)
             .fetch_one(&self.pool)
             .await
@@ -216,29 +259,37 @@ impl DatabaseBackend for PostgresDatabase {
                 DatabaseError::Operation(anyhow!("Failed to begin transaction: {e}"))
             })?;
 
-        let post_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO posts (user_id, caption, location_name) VALUES ($1, $2, $3) RETURNING id",
+        let post_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        sqlx::query(
+            "INSERT INTO posts (id, user_id, caption, location_name, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
+        .bind(post_id)
         .bind(user_id)
         .bind(caption)
         .bind(location_name)
-        .fetch_one(&mut *tx)
+        .bind(now)
+        .execute(&mut *tx)
         .await
         .map_err(|e| DatabaseError::Operation(anyhow!("Failed to insert post: {e}")))?;
 
         for tag in parse_hashtags(caption) {
+            let candidate_id = Uuid::new_v4();
             let hashtag_id: Uuid = sqlx::query_scalar(
-                "INSERT INTO hashtags (tag) VALUES ($1)
-                 ON CONFLICT (tag) DO UPDATE SET tag = EXCLUDED.tag
+                "INSERT INTO hashtags (id, tag) VALUES (?1, ?2)
+                 ON CONFLICT (tag) DO UPDATE SET tag = excluded.tag
                  RETURNING id",
             )
+            .bind(candidate_id)
             .bind(&tag)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| DatabaseError::Operation(anyhow!("Failed to upsert hashtag: {e}")))?;
 
             sqlx::query(
-                "INSERT INTO post_hashtags (post_id, hashtag_id) VALUES ($1, $2)
+                "INSERT INTO post_hashtags (post_id, hashtag_id) VALUES (?1, ?2)
                  ON CONFLICT DO NOTHING",
             )
             .bind(post_id)
@@ -249,9 +300,10 @@ impl DatabaseBackend for PostgresDatabase {
         }
 
         for (position, stored) in media.iter().enumerate() {
+            let exif_json = stored.exif.as_ref().map(|v| v.to_string());
             sqlx::query(
-                "INSERT INTO media (id, owner_id, storage_key, mime_type, width, height, size_bytes, sha256, exif)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                "INSERT INTO media (id, owner_id, storage_key, mime_type, width, height, size_bytes, sha256, exif, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
             .bind(stored.media_id)
             .bind(user_id)
@@ -261,7 +313,8 @@ impl DatabaseBackend for PostgresDatabase {
             .bind(stored.height as i32)
             .bind(stored.size_bytes)
             .bind(&stored.sha256)
-            .bind(&stored.exif)
+            .bind(exif_json)
+            .bind(now)
             .execute(&mut *tx)
             .await
             .map_err(|e| DatabaseError::Operation(anyhow!("Failed to insert media: {e}")))?;
@@ -269,7 +322,7 @@ impl DatabaseBackend for PostgresDatabase {
             for derivative in &stored.derivatives {
                 sqlx::query(
                     "INSERT INTO media_derivatives (media_id, variant, storage_key, width, height, size_bytes)
-                     VALUES ($1, $2, $3, $4, $5, $6)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 )
                 .bind(stored.media_id)
                 .bind(derivative.variant)
@@ -282,7 +335,7 @@ impl DatabaseBackend for PostgresDatabase {
                 .map_err(|e| DatabaseError::Operation(anyhow!("Failed to insert derivative: {e}")))?;
             }
 
-            sqlx::query("INSERT INTO post_media (post_id, media_id, position) VALUES ($1, $2, $3)")
+            sqlx::query("INSERT INTO post_media (post_id, media_id, position) VALUES (?1, ?2, ?3)")
                 .bind(post_id)
                 .bind(stored.media_id)
                 .bind(position as i32)
@@ -321,9 +374,9 @@ impl DatabaseBackend for PostgresDatabase {
 
     async fn load_post_page(&self, post_id: Uuid) -> Result<Option<PostPage>, DatabaseError> {
         let row: Option<PostRow> = sqlx::query_as(
-            "SELECT p.id, p.user_id, p.caption, u.username::text, p.created_at, p.location_name
-                 FROM posts p JOIN users u ON u.id = p.user_id
-                 WHERE p.id = $1",
+            "SELECT p.id, p.user_id, p.caption, u.username, p.created_at, p.location_name
+             FROM posts p JOIN users u ON u.id = p.user_id
+             WHERE p.id = ?1",
         )
         .bind(post_id)
         .fetch_optional(&self.pool)
@@ -334,11 +387,10 @@ impl DatabaseBackend for PostgresDatabase {
             return Ok(None);
         };
 
-        // JSONB decoded via ::text + serde (consistent with the sessions table).
         let media_rows: Vec<MediaExifRow> = sqlx::query_as(
-            "SELECT pm.media_id, m.exif::text, m.version
+            "SELECT pm.media_id, m.exif, m.version
              FROM post_media pm JOIN media m ON m.id = pm.media_id
-             WHERE pm.post_id = $1 ORDER BY pm.position",
+             WHERE pm.post_id = ?1 ORDER BY pm.position",
         )
         .bind(post_id)
         .fetch_all(&self.pool)
@@ -355,9 +407,9 @@ impl DatabaseBackend for PostgresDatabase {
             .collect();
 
         let hashtags: Vec<String> = sqlx::query_scalar(
-            "SELECT h.tag::text FROM post_hashtags ph
+            "SELECT h.tag FROM post_hashtags ph
              JOIN hashtags h ON h.id = ph.hashtag_id
-             WHERE ph.post_id = $1 ORDER BY h.tag",
+             WHERE ph.post_id = ?1 ORDER BY h.tag",
         )
         .bind(post_id)
         .fetch_all(&self.pool)
@@ -382,8 +434,8 @@ impl DatabaseBackend for PostgresDatabase {
         viewer: Option<Uuid>,
     ) -> Result<Option<ProfileView>, DatabaseError> {
         let row: Option<ProfileRow> = sqlx::query_as(
-            "SELECT id, username::text, display_name, bio, created_at
-                 FROM users WHERE username = $1 AND deleted_at IS NULL",
+            "SELECT id, username, display_name, bio, created_at
+             FROM users WHERE username = ?1 AND deleted_at IS NULL",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -394,7 +446,7 @@ impl DatabaseBackend for PostgresDatabase {
             return Ok(None);
         };
 
-        let post_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE user_id = $1")
+        let post_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE user_id = ?1")
             .bind(user_id)
             .fetch_one(&self.pool)
             .await
@@ -405,18 +457,20 @@ impl DatabaseBackend for PostgresDatabase {
         let rows: Vec<ProfileThumbRow> = sqlx::query_as(
             "SELECT p.id, first_pm.media_id, first_pm.version
              FROM posts p
-             LEFT JOIN LATERAL (
-                 SELECT pm.media_id, m.version
-                 FROM post_media pm JOIN media m ON m.id = pm.media_id
-                 WHERE pm.post_id = p.id ORDER BY pm.position LIMIT 1
-             ) first_pm ON true
-             WHERE p.user_id = $1
+             LEFT JOIN (
+                 SELECT pm.post_id, pm.media_id, m.version,
+                        ROW_NUMBER() OVER (PARTITION BY pm.post_id ORDER BY pm.position) AS rn
+                 FROM post_media pm
+                 JOIN media m ON m.id = pm.media_id
+             ) first_pm ON first_pm.post_id = p.id AND first_pm.rn = 1
+             WHERE p.user_id = ?1
              ORDER BY p.created_at DESC, p.id DESC",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load profile posts: {e}")))?;
+
         let thumbs: Vec<ProfileThumb> = rows
             .into_iter()
             .filter_map(|(post_id, media_id, version)| {
@@ -462,7 +516,7 @@ impl DatabaseBackend for PostgresDatabase {
         variant: &str,
     ) -> Result<Option<String>, DatabaseError> {
         sqlx::query_scalar(
-            "SELECT storage_key FROM media_derivatives WHERE media_id = $1 AND variant = $2",
+            "SELECT storage_key FROM media_derivatives WHERE media_id = ?1 AND variant = ?2",
         )
         .bind(media_id)
         .bind(variant)
@@ -480,30 +534,26 @@ impl DatabaseBackend for PostgresDatabase {
 /// `followers = true` lists who follows `username`; otherwise the accounts
 /// `username` follows.
 async fn account_list(
-    pool: &PgPool,
+    pool: &SqlitePool,
     username: &str,
     followers: bool,
 ) -> Result<Vec<AccountSummary>, DatabaseError> {
-    // Two literal queries rather than a `format!` that swaps the join
-    // direction. The varying part is the direction of a fixed pair of
-    // column-to-column equality checks — never user input — so nothing
-    // needs to be bound, and both statements stay `&'static str`.
-    const FOLLOWERS: &str = "SELECT u.username::text AS username,
-         COALESCE(u.display_name, u.username::text) AS display_name,
-         UPPER(SUBSTRING(u.username FROM 1 FOR 1)) AS initial
+    const FOLLOWERS: &str = "SELECT u.username AS username,
+         COALESCE(u.display_name, u.username) AS display_name,
+         UPPER(SUBSTR(u.username, 1, 1)) AS initial
          FROM follows f
          JOIN users u ON u.id = f.follower_id
          JOIN users me ON me.id = f.followee_id
-         WHERE me.username = $1
+         WHERE me.username = ?1
          ORDER BY f.created_at DESC, u.username";
 
-    const FOLLOWING: &str = "SELECT u.username::text AS username,
-         COALESCE(u.display_name, u.username::text) AS display_name,
-         UPPER(SUBSTRING(u.username FROM 1 FOR 1)) AS initial
+    const FOLLOWING: &str = "SELECT u.username AS username,
+         COALESCE(u.display_name, u.username) AS display_name,
+         UPPER(SUBSTR(u.username, 1, 1)) AS initial
          FROM follows f
          JOIN users u ON u.id = f.followee_id
          JOIN users me ON me.id = f.follower_id
-         WHERE me.username = $1
+         WHERE me.username = ?1
          ORDER BY f.created_at DESC, u.username";
 
     let rows: Vec<AccountSummary> = sqlx::query_as(if followers { FOLLOWERS } else { FOLLOWING })
@@ -531,10 +581,10 @@ async fn account_list(
 }
 
 /// Keyset-paginated post query. The cursor is the last-seen post id; its
-/// `created_at` is resolved and used for a row-value comparison so posts
+/// `created_at` is resolved and used for a tuple comparison so posts
 /// sharing a timestamp are never skipped or duplicated.
 async fn load_page(
-    pool: &PgPool,
+    pool: &SqlitePool,
     before: Option<(DateTime<Utc>, Uuid)>,
     tag: Option<&str>,
     limit: i64,
@@ -542,32 +592,22 @@ async fn load_page(
     let cursor_created = before.as_ref().map(|(c, _)| *c);
     let cursor_id = before.as_ref().map(|(_, i)| *i);
 
-    // Two literal statements rather than a `format!` that splices in an
-    // optional join. `tag` is user input and is bound as $4 - never
-    // interpolated - so the only difference between the two statements is
-    // which joins are present, which is not dynamic data.
-    const FEED: &str = "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
+    const FEED: &str = "SELECT p.id, p.caption, p.location_name, u.username, p.created_at
          FROM posts p
          JOIN users u ON u.id = p.user_id
-         WHERE (p.created_at, p.id) < (
-             COALESCE($1, 'infinity'::timestamptz),
-             COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
-         )
+         WHERE (?1 IS NULL OR p.created_at < ?1 OR (p.created_at = ?1 AND p.id < ?2))
          ORDER BY p.created_at DESC, p.id DESC
-         LIMIT $3";
+         LIMIT ?3";
 
     const TAGGED_FEED: &str =
-        "SELECT p.id, p.caption, p.location_name, u.username::text, p.created_at
+        "SELECT p.id, p.caption, p.location_name, u.username, p.created_at
          FROM posts p
          JOIN users u ON u.id = p.user_id
          JOIN post_hashtags ph ON ph.post_id = p.id
-         JOIN hashtags h ON h.id = ph.hashtag_id AND h.tag = $4
-         WHERE (p.created_at, p.id) < (
-             COALESCE($1, 'infinity'::timestamptz),
-             COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
-         )
+         JOIN hashtags h ON h.id = ph.hashtag_id AND h.tag = ?4
+         WHERE (?1 IS NULL OR p.created_at < ?1 OR (p.created_at = ?1 AND p.id < ?2))
          ORDER BY p.created_at DESC, p.id DESC
-         LIMIT $3";
+         LIMIT ?3";
 
     let mut query = sqlx::query_as::<_, FeedRow>(match tag {
         Some(_) => TAGGED_FEED,
@@ -613,23 +653,30 @@ async fn load_page(
 }
 
 async fn load_media_ids(
-    pool: &PgPool,
+    pool: &SqlitePool,
     post_ids: &[Uuid],
 ) -> Result<std::collections::HashMap<Uuid, Vec<CardMedia>>, DatabaseError> {
     if post_ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let rows: Vec<MediaVersionRow> = sqlx::query_as(
+
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
         "SELECT pm.post_id, m.id, m.version
          FROM post_media pm
          JOIN media m ON m.id = pm.media_id
-         WHERE pm.post_id = ANY($1)
-         ORDER BY pm.post_id, pm.position",
-    )
-    .bind(post_ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load post media: {e}")))?;
+         WHERE pm.post_id IN (",
+    );
+    let mut separated = qb.separated(", ");
+    for id in post_ids {
+        separated.push_bind(*id);
+    }
+    qb.push(") ORDER BY pm.post_id, pm.position");
+
+    let rows: Vec<MediaVersionRow> = qb
+        .build_query_as()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load post media: {e}")))?;
 
     let mut map: std::collections::HashMap<Uuid, Vec<CardMedia>> = std::collections::HashMap::new();
     for (post_id, media_id, version) in rows {
@@ -641,23 +688,30 @@ async fn load_media_ids(
 }
 
 async fn load_hashtags(
-    pool: &PgPool,
+    pool: &SqlitePool,
     post_ids: &[Uuid],
 ) -> Result<std::collections::HashMap<Uuid, Vec<String>>, DatabaseError> {
     if post_ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let rows: Vec<TagRow> = sqlx::query_as(
-        "SELECT ph.post_id, h.tag::text
+
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT ph.post_id, h.tag
          FROM post_hashtags ph
          JOIN hashtags h ON h.id = ph.hashtag_id
-         WHERE ph.post_id = ANY($1)
-         ORDER BY h.tag",
-    )
-    .bind(post_ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load post hashtags: {e}")))?;
+         WHERE ph.post_id IN (",
+    );
+    let mut separated = qb.separated(", ");
+    for id in post_ids {
+        separated.push_bind(*id);
+    }
+    qb.push(") ORDER BY h.tag");
+
+    let rows: Vec<TagRow> = qb
+        .build_query_as()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DatabaseError::Operation(anyhow!("Failed to load post hashtags: {e}")))?;
 
     let mut map: std::collections::HashMap<Uuid, Vec<String>> = std::collections::HashMap::new();
     for (post_id, tag) in rows {
@@ -668,14 +722,14 @@ async fn load_hashtags(
 
 /// Resolve a cursor post id to its (created_at, id) ordering key.
 async fn resolve_cursor(
-    pool: &PgPool,
+    pool: &SqlitePool,
     before: Option<Uuid>,
 ) -> Result<Option<(DateTime<Utc>, Uuid)>, DatabaseError> {
     let Some(before) = before else {
         return Ok(None);
     };
     let row: Option<DateTime<Utc>> =
-        sqlx::query_scalar("SELECT created_at FROM posts WHERE id = $1")
+        sqlx::query_scalar("SELECT created_at FROM posts WHERE id = ?1")
             .bind(before)
             .fetch_optional(pool)
             .await

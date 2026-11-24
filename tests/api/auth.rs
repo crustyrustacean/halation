@@ -101,7 +101,7 @@ async fn register_creates_account_and_redirects_to_login() {
     );
 
     let stored: (String, String) =
-        sqlx::query_as("SELECT username::text, email::text FROM users WHERE username = 'jeff'")
+        sqlx::query_as("SELECT username, email FROM users WHERE username = 'jeff'")
             .fetch_one(&app.db_pool)
             .await
             .expect("user should be persisted");
@@ -206,7 +206,7 @@ async fn login_sets_session_and_home_page_greets_logged_in_user() {
         .fetch_one(&app.db_pool)
         .await
         .unwrap();
-    assert_eq!(1, count, "the session record lives in Postgres");
+    assert_eq!(1, count, "the session record lives in SQLite");
     let owner: Option<Uuid> = sqlx::query_scalar("SELECT user_id FROM sessions LIMIT 1")
         .fetch_one(&app.db_pool)
         .await

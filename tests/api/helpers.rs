@@ -1,15 +1,22 @@
 // tests/api/helpers.rs
 
 // dependencies
-use halation::configuration::{DatabaseSettings, get_configuration};
-use halation::startup::{Application, get_connection_pool};
+use halation::authentication::SqliteSessionStore;
+use halation::configuration::get_configuration;
+use halation::database::{DatabaseBackend, SqliteDatabase};
+use halation::services::RateLimiter;
+use halation::services::geocode::Geocoder;
+use halation::startup::{AUTH_BURST_CAPACITY, AUTH_RATE_PER_SECOND, AppDeps, Application};
+use halation::storage::{InMemoryStorageBackend, StorageBackend};
 use halation::telemetry::{get_subscriber, init_subscriber};
-use secrecy::{ExposeSecret, SecretString};
-use sqlx::{Connection, Executor, PgConnection, PgPool};
-use std::sync::LazyLock;
+use halation::template::{TemplateRenderer, tera::TeraRenderer};
+use secrecy::ExposeSecret;
+use sqlx::SqlitePool;
+use std::path::PathBuf;
+use std::sync::{Arc, LazyLock};
 use uuid::Uuid;
 
-// Ensure that the `tracing` stack is only initialised once using `once_cell`
+// Ensure that the `tracing` stack is only initialised once using `LazyLock`
 static TRACING: LazyLock<()> = LazyLock::new(|| {
     let default_filter_level = "info".to_string();
     let subscriber_name = "test".to_string();
@@ -26,8 +33,17 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
 pub struct TestApp {
     pub address: String,
     pub port: u16,
-    pub db_pool: PgPool,
+    pub db_pool: SqlitePool,
     pub api_client: reqwest::Client,
+    db_path: PathBuf,
+}
+
+impl Drop for TestApp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", self.db_path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", self.db_path.display()));
+    }
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -41,23 +57,18 @@ pub async fn spawn_app_with(
 ) -> TestApp {
     LazyLock::force(&TRACING);
 
+    let db_path = std::env::temp_dir().join(format!("halation-test-{}.db", Uuid::new_v4()));
+
     let mut configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
 
-        c.database.database_name = Uuid::new_v4().to_string();
+        c.database.path = db_path.to_string_lossy().into_owned();
         // Keep tests hermetic: no reverse-geocode network calls.
         c.geocode.enabled = false;
 
         c.application.port = 0;
 
         // --- Hermetic test configuration -------------------------------
-        //
-        // Everything below overrides whatever the surrounding environment
-        // says, so a developer's `.env` or exported `APP_*` variables can
-        // never redirect a test at real infrastructure. This is a second
-        // line of defence: `Application::build` also refuses a remote
-        // storage backend outright when `testing` is set, and fails loudly
-        // rather than silently succeeding against production.
         c.application.testing = true;
         c.storage.backend = "memory".to_string();
         c.storage.r2 = Default::default();
@@ -71,14 +82,44 @@ pub async fn spawn_app_with(
     // able to undo the guarantees above. Re-assert after it runs.
     assert_test_configuration_is_local(&configuration);
 
-    configure_database(&configuration.database).await;
+    // Construct injected dependencies (matching main.rs) and launch the server.
+    let sqlite = SqliteDatabase::connect(&configuration.database)
+        .await
+        .expect("Failed to initialise test SQLite database.");
+    let db_pool = sqlite.pool();
+    let session_store = SqliteSessionStore::new(db_pool.clone());
+    let database: Arc<dyn DatabaseBackend> = Arc::new(sqlite);
 
-    // Launch the application as a background task
-    let application = Application::build(configuration.clone())
+    let mut site = serde_json::Map::new();
+    site.insert(
+        "registration_open".into(),
+        serde_json::json!(configuration.application.registration_open),
+    );
+    let template_renderer: Arc<dyn TemplateRenderer> =
+        Arc::new(TeraRenderer::with_site(site).expect("Failed to build template renderer."));
+    let storage: Arc<dyn StorageBackend> = Arc::new(InMemoryStorageBackend::new());
+    let rate_limiter = Arc::new(
+        RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)
+            .expect("Failed to build rate limiter."),
+    );
+    let geocoder = Arc::new(Geocoder::new(
+        configuration.geocode.enabled,
+        configuration.geocode.base_url.clone(),
+    ));
+
+    let deps = AppDeps {
+        template_renderer,
+        database,
+        storage,
+        session_store,
+        rate_limiter,
+        geocoder,
+    };
+
+    let application = Application::build(configuration, deps)
         .await
         .expect("Failed to build application.");
     let application_port = application.port();
-    // Spawn and detach: the JoinHandle is dropped, the server keeps running.
     tokio::spawn(application.run_until_stopped());
 
     let client = reqwest::Client::builder()
@@ -89,8 +130,9 @@ pub async fn spawn_app_with(
     TestApp {
         address: format!("http://localhost:{}", application_port),
         port: application_port,
-        db_pool: get_connection_pool(&configuration.database),
+        db_pool,
         api_client: client,
+        db_path,
     }
 }
 
@@ -174,18 +216,6 @@ pub async fn register_and_login(
 
 /// Fail loudly if anything about this test run could touch real
 /// infrastructure, or if the surrounding environment is a production one.
-///
-/// Two distinct hazards, both observed in practice:
-///
-/// 1. `APP_STORAGE__BACKEND=s3` (plus credentials) leaking in from a `.env`
-///    or an exported variable, which sends test uploads to the live bucket.
-/// 2. `APP_ENVIRONMENT=production` in the shell, which loads
-///    `production.yaml` and can disable registration or point at other
-///    production-only settings — the suite would then be testing the
-///    production configuration while believing it tests the defaults.
-///
-/// This runs before the app boots, so a mistake is a clear error message
-/// rather than a confusing 500 three layers deeper.
 fn assert_test_configuration_is_local(settings: &halation::configuration::Settings) {
     // 1. Storage must be in-process.
     assert_eq!(
@@ -208,45 +238,13 @@ fn assert_test_configuration_is_local(settings: &halation::configuration::Settin
     assert_ne!(
         "production", environment,
         "APP_ENVIRONMENT=production in the environment: tests would load \
-         production.yaml. Unset it, or export APP_ENVIRONMENT=local."
+         production.toml. Unset it, or export APP_ENVIRONMENT=local."
     );
 
-    // 3. The database must be a throwaway one, not the real `halation`.
-    let name = &settings.database.database_name;
-    let looks_like_throwaway = Uuid::parse_str(name).is_ok();
+    // 3. The database must be a throwaway test file, not the dev `data/halation.db`.
     assert!(
-        looks_like_throwaway,
-        "tests must run against a throwaway database, but database_name is {name:?}. \
-         The harness assigns a UUID; something overwrote it."
+        settings.database.path.contains("halation-test-"),
+        "tests must run against a throwaway SQLite file, but database.path is {:?}.",
+        settings.database.path
     );
-}
-
-async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    let maintenance_settings = DatabaseSettings {
-        database_name: "postgres".to_string(),
-        username: "postgres".to_string(),
-        password: SecretString::new("password".into()),
-        ..config.clone()
-    };
-    let mut connection = PgConnection::connect_with(&maintenance_settings.connect_options())
-        .await
-        .expect("Failed to connect to Postgres");
-    connection
-        // Test-database name, generated as a UUID by `spawn_app`.
-        .execute(sqlx::AssertSqlSafe(format!(
-            r#"CREATE DATABASE "{}";"#,
-            config.database_name
-        )))
-        .await
-        .expect("Failed to create database.");
-
-    // Migrate database
-    let connection_pool = PgPool::connect_with(config.connect_options())
-        .await
-        .expect("Failed to connect to Postgres.");
-    sqlx::migrate!("./migrations")
-        .run(&connection_pool)
-        .await
-        .expect("Failed to migrate the database");
-    connection_pool
 }

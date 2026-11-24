@@ -2,7 +2,7 @@
 //!
 //! Post and profile view types plus caption parsing — the vocabulary the
 //! routes and templates share. Every SQL statement that fills these types
-//! lives in `database::postgres`, behind the `DatabaseBackend` trait.
+//! lives in `database::sqlite`, behind the `DatabaseBackend` trait.
 
 use serde::Serialize;
 use uuid::Uuid;

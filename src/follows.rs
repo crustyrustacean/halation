@@ -1,7 +1,7 @@
 // src/follows.rs
 //!
 //! The social graph's shared types. Every SQL statement that reads or
-//! writes `follows` lives in `database::postgres`, behind the
+//! writes `follows` lives in `database::sqlite`, behind the
 //! `DatabaseBackend` trait.
 
 use serde::Serialize;

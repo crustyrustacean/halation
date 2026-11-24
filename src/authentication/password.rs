@@ -57,29 +57,31 @@ impl Clone for PasswordHashSecret {
 // generated `RETURNING`/`SELECT` lists keep describing a plain TEXT column
 // and no migration is implied by this newtype.
 
-impl sqlx::Type<sqlx::Postgres> for PasswordHashSecret {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+impl sqlx::Type<sqlx::Sqlite> for PasswordHashSecret {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <String as sqlx::Type<sqlx::Sqlite>>::type_info()
     }
 
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
     }
 }
 
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for PasswordHashSecret {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let raw = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for PasswordHashSecret {
+    fn decode(
+        value: sqlx::sqlite::SqliteValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let raw = <String as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
         Ok(Self::from(SecretString::from(raw)))
     }
 }
 
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for PasswordHashSecret {
+impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for PasswordHashSecret {
     fn encode_by_ref(
         &self,
-        buf: &mut <sqlx::Postgres as sqlx::database::Database>::ArgumentBuffer,
+        buf: &mut <sqlx::Sqlite as sqlx::database::Database>::ArgumentBuffer,
     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        <&str as sqlx::Encode<sqlx::Postgres>>::encode(self.expose(), buf)
+        <String as sqlx::Encode<sqlx::Sqlite>>::encode(self.expose().to_string(), buf)
     }
 }
 

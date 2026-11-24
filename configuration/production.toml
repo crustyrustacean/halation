@@ -1,0 +1,24 @@
+# Production overrides (Fly.io).
+# Loaded WITHOUT `.allow_secrets()` — confik rejects any secret placed in this
+# file. Production secrets must come from environment variables (`fly secrets set`).
+
+[application]
+host = "0.0.0.0"
+# Registration is closed while Halation is under active development —
+# flip to true (or APP_APPLICATION__REGISTRATION_OPEN=true) to reopen.
+registration_open = false
+# Fly.io's edge proxy terminates TLS and forwards traffic to the app, so the
+# socket peer is always the Fly proxy and rate limiting would otherwise key
+# on one address shared by every visitor in the world. Fly sets and
+# overwrites `Fly-Client-IP` with the client address it actually observed
+# (falling back to the last entry of `X-Forwarded-For` for other single-hop
+# reverse proxies).
+#
+# Only set this when a proxy really is in front and really does overwrite
+# the header. If a client can set it directly, every visitor gets their own
+# forged rate-limit bucket.
+trusted_proxy = true
+
+[database]
+# Mounted Fly.io persistent volume (see fly.toml `[mounts]`).
+path = "/data/halation.db"

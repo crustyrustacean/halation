@@ -7,22 +7,22 @@ use actix_session::storage::{
 use actix_web::cookie::time::Duration as CookieDuration;
 use anyhow::anyhow;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
-/// Server-side sessions in Postgres. One row per session: the opaque
-/// actix-session state (`state`, JSONB) plus Halation's management metadata
+/// Server-side sessions in SQLite. One row per session: the opaque
+/// actix-session state (`state`, JSON text) plus Halation's management metadata
 /// (owner, expiry, user agent, ip) that powers the settings-page device list
 /// and "log out everywhere".
 #[derive(Clone)]
-pub struct PostgresSessionStore {
-    pool: PgPool,
+pub struct SqliteSessionStore {
+    pool: SqlitePool,
 }
 
-impl PostgresSessionStore {
-    pub fn new(pool: PgPool) -> Self {
+impl SqliteSessionStore {
+    pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
@@ -32,13 +32,13 @@ impl PostgresSessionStore {
     }
 }
 
-impl SessionStore for PostgresSessionStore {
+impl SessionStore for SqliteSessionStore {
     async fn load(
         &self,
         session_key: &SessionKey,
     ) -> Result<Option<HashMap<String, String>>, LoadError> {
         let row = sqlx::query_as::<_, (String, Option<DateTime<Utc>>)>(
-            "SELECT state::text, expires_at FROM sessions WHERE id = $1",
+            "SELECT state, expires_at FROM sessions WHERE id = ?1",
         )
         .bind(session_key.as_ref())
         .fetch_optional(&self.pool)
@@ -50,7 +50,7 @@ impl SessionStore for PostgresSessionStore {
             Some((state_json, expires_at)) => {
                 // An expired row is a miss: sweep it and answer None.
                 if expires_at.is_some_and(|at| at < Utc::now()) {
-                    sqlx::query("DELETE FROM sessions WHERE id = $1")
+                    sqlx::query("DELETE FROM sessions WHERE id = ?1")
                         .bind(session_key.as_ref())
                         .execute(&self.pool)
                         .await
@@ -78,15 +78,18 @@ impl SessionStore for PostgresSessionStore {
         let user_id = extracted_uuid(&session_state, "user_id");
         let user_agent = session_state.get("login_user_agent").cloned();
         let ip = extracted_ip(&session_state, "login_ip");
+        let now = Utc::now();
 
         sqlx::query(
-            "INSERT INTO sessions (id, user_id, state, expires_at, last_seen_at, user_agent, ip)
-             VALUES ($1, $2, $3::jsonb, $4, now(), $5, $6::inet)",
+            "INSERT INTO sessions (id, user_id, state, created_at, expires_at, last_seen_at, user_agent, ip)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )
         .bind(session_key.as_ref())
         .bind(user_id)
         .bind(&state_json)
+        .bind(now)
         .bind(Self::expires_at_from(ttl))
+        .bind(now)
         .bind(user_agent)
         .bind(ip.map(|i| i.to_string()))
         .execute(&self.pool)
@@ -105,21 +108,24 @@ impl SessionStore for PostgresSessionStore {
         let state_json = serde_json::to_string(&session_state)
             .map_err(|e| UpdateError::Serialization(anyhow!("Failed to encode session: {e}")))?;
         let user_id = extracted_uuid(&session_state, "user_id");
+        let now = Utc::now();
 
         // Upsert: actix may update a session whose row we swept; recreate it.
         sqlx::query(
-            "INSERT INTO sessions (id, user_id, state, expires_at, last_seen_at)
-             VALUES ($1, $2, $3::jsonb, $4, now())
+            "INSERT INTO sessions (id, user_id, state, created_at, expires_at, last_seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (id) DO UPDATE
-             SET user_id = EXCLUDED.user_id,
-                 state = EXCLUDED.state,
-                 expires_at = EXCLUDED.expires_at,
-                 last_seen_at = now()",
+             SET user_id = excluded.user_id,
+                 state = excluded.state,
+                 expires_at = excluded.expires_at,
+                 last_seen_at = excluded.last_seen_at",
         )
         .bind(session_key.as_ref())
         .bind(user_id)
         .bind(&state_json)
+        .bind(now)
         .bind(Self::expires_at_from(ttl))
+        .bind(now)
         .execute(&self.pool)
         .await
         .map_err(|e| UpdateError::Other(anyhow!("Failed to update session: {e}")))?;
@@ -132,7 +138,7 @@ impl SessionStore for PostgresSessionStore {
         session_key: &SessionKey,
         ttl: &CookieDuration,
     ) -> Result<(), anyhow::Error> {
-        sqlx::query("UPDATE sessions SET expires_at = $2 WHERE id = $1")
+        sqlx::query("UPDATE sessions SET expires_at = ?2 WHERE id = ?1")
             .bind(session_key.as_ref())
             .bind(Self::expires_at_from(ttl))
             .execute(&self.pool)
@@ -142,7 +148,7 @@ impl SessionStore for PostgresSessionStore {
     }
 
     async fn delete(&self, session_key: &SessionKey) -> Result<(), anyhow::Error> {
-        sqlx::query("DELETE FROM sessions WHERE id = $1")
+        sqlx::query("DELETE FROM sessions WHERE id = ?1")
             .bind(session_key.as_ref())
             .execute(&self.pool)
             .await

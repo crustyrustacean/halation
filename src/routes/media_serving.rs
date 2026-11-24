@@ -22,8 +22,8 @@ const CACHE_IMMUTABLE: &str = "public, max-age=31536000, immutable";
     fields(media_id = tracing::field::Empty, variant = tracing::field::Empty)
 )]
 pub async fn get_media_derivative(
-    db: web::Data<Box<dyn DatabaseBackend>>,
-    storage: web::Data<Box<dyn StorageBackend>>,
+    db: web::Data<dyn DatabaseBackend>,
+    storage: web::Data<dyn StorageBackend>,
     path: web::Path<(Uuid, String)>,
     _req: HttpRequest,
 ) -> HttpResponse {

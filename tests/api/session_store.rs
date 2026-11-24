@@ -2,24 +2,25 @@
 
 use crate::helpers::spawn_app;
 use actix_session::storage::{SessionKey, SessionStore};
-use halation::authentication::PostgresSessionStore;
+use halation::authentication::SqliteSessionStore;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn session_store_round_trips_through_postgres() {
+async fn session_store_round_trips_through_sqlite() {
     // Arrange — the spawned app's own pool, so the store writes to the
     // same throwaway database the harness created.
     let app = spawn_app().await;
-    let store = PostgresSessionStore::new(app.db_pool.clone());
+    let store = SqliteSessionStore::new(app.db_pool.clone());
 
     // A session belongs to a real account: create one to satisfy the FK.
-    let user_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash)
-         VALUES ('storetest', 'storetest@example.com', 'not-a-real-hash')
-         RETURNING id",
+    let user_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO users (id, username, email, password_hash)
+         VALUES (?1, 'storetest', 'storetest@example.com', 'not-a-real-hash')",
     )
-    .fetch_one(&app.db_pool)
+    .bind(user_id)
+    .execute(&app.db_pool)
     .await
     .expect("user seed should succeed");
 
@@ -94,7 +95,7 @@ async fn session_store_round_trips_through_postgres() {
 async fn expired_sessions_are_swept_on_load() {
     // Arrange
     let app = spawn_app().await;
-    let store = PostgresSessionStore::new(app.db_pool.clone());
+    let store = SqliteSessionStore::new(app.db_pool.clone());
 
     let state: HashMap<String, String> = HashMap::from([("k".to_string(), "v".to_string())]);
     let negative_ttl = actix_web::cookie::time::Duration::seconds(-1);

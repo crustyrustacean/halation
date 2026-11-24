@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# ---- Stage 1: Chef — dependency caching ----
-FROM rust:bookworm AS chef
-RUN cargo install cargo-chef
+# ---- Stage 1: Chef — dependency caching (pre-installed cargo-chef) ----
+FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
 WORKDIR /app
 
 # ---- Stage 2: Planner — extract dependency info from Cargo.toml/lock ----
@@ -14,7 +13,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 
 # libheif for the heic crate (iPhone photo support)
-RUN apt-get update && apt-get install -y libheif-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libheif-dev && rm -rf /var/lib/apt/lists/*
 
 # Compile dependencies first (cached layer)
 COPY --from=planner /app/recipe.json recipe.json
@@ -27,7 +26,7 @@ RUN cargo build --release --bin halation --bin backfill_media_keys
 # ---- Stage 4: Runtime — slim image with only what's needed to run ----
 FROM debian:bookworm-slim AS runtime
 
-# libheif runtime lib + ca-certificates (Nominatim/DB TLS) + curl (healthcheck)
+# libheif runtime lib + ca-certificates (Nominatim/R2 TLS) + curl (healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libheif1 ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
@@ -38,10 +37,12 @@ COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
 COPY --from=builder /app/configuration /app/configuration
 
-# Non-root
-RUN useradd -r -u 1001 appuser && chown -R appuser:appuser /app
+# Non-root; create /data owned by appuser so Fly.io's mounted volume inherits
+# writable ownership for the SQLite database file.
+RUN useradd -r -u 1001 appuser && mkdir -p /data && chown -R appuser:appuser /app /data
 USER appuser
 
+ENV APP_ENVIRONMENT=production
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -sf http://127.0.0.1:8000/health_check || exit 1

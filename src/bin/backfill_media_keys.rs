@@ -15,14 +15,14 @@
 //! - `--dry-run` prints the plan and touches nothing.
 //!
 //! Runs inside the app container (which already has the R2 env vars):
-//! `docker compose exec app /app/backfill_media_keys --dry-run`
+//! `fly ssh console -C "/app/backfill_media_keys --dry-run"`
 
 use anyhow::Context;
 use halation::configuration::get_configuration;
 use halation::services::media::{is_legacy_key, media_key};
 use halation::startup::get_connection_pool;
 use halation::storage::{InMemoryStorageBackend, OpendalStorageBackend, StorageBackend};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 /// A media row (plus its derivative rows) still living in the legacy
@@ -44,7 +44,7 @@ struct PendingDerivative {
 
 /// Media rows (oldest first) whose original key does not yet carry the
 /// owner segment, each with its derivative rows.
-async fn find_pending(pool: &PgPool) -> anyhow::Result<Vec<PendingMedia>> {
+async fn find_pending(pool: &SqlitePool) -> anyhow::Result<Vec<PendingMedia>> {
     let rows: Vec<(Uuid, Uuid, String)> =
         sqlx::query_as("SELECT id, owner_id, storage_key FROM media ORDER BY created_at, id")
             .fetch_all(pool)
@@ -115,7 +115,7 @@ async fn copy_object(
 /// untouched and only duplicate objects exist — re-running finishes cleanly.
 async fn migrate_row(
     storage: &dyn StorageBackend,
-    pool: &PgPool,
+    pool: &SqlitePool,
     row: &PendingMedia,
 ) -> anyhow::Result<()> {
     let new_original_key = media_key(row.owner_id, row.media_id, &row.original_name);
@@ -223,36 +223,19 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use secrecy::SecretString;
-    use sqlx::{Connection, Executor, PgConnection};
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
-    /// A throwaway database per test, migrated to head — the same pattern
-    /// as tests/api/helpers.
-    async fn test_pool() -> PgPool {
-        let mut configuration = get_configuration().expect("Failed to read configuration");
-        configuration.database.database_name = Uuid::new_v4().to_string();
-
-        let maintenance = halation::configuration::DatabaseSettings {
-            database_name: "postgres".to_string(),
-            username: "postgres".to_string(),
-            password: SecretString::new("password".into()),
-            ..configuration.database.clone()
-        };
-        let mut connection = PgConnection::connect_with(&maintenance.connect_options())
+    /// An isolated in-memory SQLite database per test, migrated to head.
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .in_memory(true)
+                    .foreign_keys(true),
+            )
             .await
-            .expect("Failed to connect to Postgres");
-        connection
-            // Test-database name, generated as a UUID by this test harness.
-            .execute(sqlx::AssertSqlSafe(format!(
-                r#"CREATE DATABASE "{}";"#,
-                configuration.database.database_name
-            )))
-            .await
-            .expect("Failed to create the test database");
-
-        let pool = PgPool::connect_with(configuration.database.connect_options())
-            .await
-            .expect("Failed to connect to the test database");
+            .expect("Failed to open in-memory SQLite");
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
@@ -263,16 +246,18 @@ mod tests {
     /// One user + one media row (original + the three standard derivatives)
     /// in the legacy global namespace, with bytes stored at the legacy keys.
     async fn seed_legacy_media(
-        pool: &PgPool,
+        pool: &SqlitePool,
         storage: &InMemoryStorageBackend,
     ) -> (Uuid, Uuid, Vec<String>) {
-        let owner_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+        let owner_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, username, email, password_hash) VALUES (?1, ?2, ?3, ?4)",
         )
+        .bind(owner_id)
         .bind("legacyowner")
         .bind("legacy@example.com")
         .bind("not-a-real-hash")
-        .fetch_one(pool)
+        .execute(pool)
         .await
         .expect("Failed to seed user");
 

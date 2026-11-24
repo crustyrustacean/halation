@@ -47,28 +47,40 @@ fn html(status: actix_web::http::StatusCode, body: String) -> HttpResponse {
 /// The address to key rate limiting on.
 ///
 /// Behind a reverse proxy the socket peer is always the proxy, so
-/// `peer_addr()` alone gives one shared bucket for every visitor. That is
-/// what this did until it was fixed: the login limiter keyed on Caddy's
-/// address, making it a global throttle that unlimited attempts from any
-/// source would trip while protecting nothing.
+/// `peer_addr()` alone gives one shared bucket for every visitor.
 ///
-/// `X-Forwarded-For` is only consulted when `application.trusted_proxy` is
-/// set, and only its **last** entry is used.
+/// Proxy headers are only consulted when `application.trusted_proxy` is set:
 ///
-/// That direction is deliberate, and the opposite of what the header looks
-/// like it wants. A proxy appends the address it observed to the end of the
-/// chain, so with exactly one trusted hop the last entry is the one the
-/// proxy itself saw. Taking the *first* entry — which is what actix's own
-/// `realip_remote_addr` does — takes the leftmost value, which is the one a
-/// client controls and can set to anything.
-///
-/// With no trusted proxy configured there is nothing to vouch for the
-/// header, so it is ignored entirely and the socket address is used. An
-/// unset value therefore cannot be turned into a spoofable one.
-///
-/// Unparseable values fall back to the socket address rather than becoming
-/// a shared literal like `"unknown"`, which would collapse every malformed
-/// header into one bucket — the same failure mode as the original bug.
+/// 1. **`Fly-Client-IP`** first — Fly.io's edge proxy sets and overwrites this
+///    header with the actual client IP it observed. (Fly appends its own edge
+///    proxy address to `X-Forwarded-For`, so reading the last entry of
+///    `X-Forwarded-For` on Fly would read the proxy IP, not the visitor.)
+/// 2. **Last entry of `X-Forwarded-For`** — for generic single-hop reverse
+///    proxies that append the observed address to the tail of the chain. Taking
+///    the *first* entry (what actix's `realip_remote_addr` does) would take the
+///    client-controlled leftmost value.
+/// 3. **Socket peer address** — fallback when no trusted proxy is configured or
+///    headers are missing/unparseable. Never returns a shared literal like
+///    `"unknown"` for malformed headers, which would collapse every malformed
+///    request into one bucket.
+fn parse_ip_header(raw: &str) -> Option<std::net::IpAddr> {
+    raw.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .ok()
+}
+
+fn client_ip_from_headers(fly_client_ip: Option<&str>, x_forwarded_for: Option<&str>) -> Option<String> {
+    if let Some(ip) = fly_client_ip.and_then(parse_ip_header) {
+        return Some(ip.to_string());
+    }
+    x_forwarded_for
+        .and_then(|v| v.split(',').next_back())
+        .and_then(parse_ip_header)
+        .map(|ip| ip.to_string())
+}
+
 fn client_ip(req: &HttpRequest, trusted_proxy: bool) -> String {
     let socket = req
         .peer_addr()
@@ -87,19 +99,16 @@ fn client_ip(req: &HttpRequest, trusted_proxy: bool) -> String {
         return from_socket();
     }
 
-    req.headers()
+    let fly_ip = req
+        .headers()
+        .get("Fly-Client-IP")
+        .and_then(|v| v.to_str().ok());
+    let xff = req
+        .headers()
         .get("X-Forwarded-For")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next_back())
-        .map(str::trim)
-        .and_then(|v| {
-            v.trim_start_matches('[')
-                .trim_end_matches(']')
-                .parse::<std::net::IpAddr>()
-                .ok()
-        })
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(from_socket)
+        .and_then(|v| v.to_str().ok());
+
+    client_ip_from_headers(fly_ip, xff).unwrap_or_else(from_socket)
 }
 
 /// Normalize and validate registration input. Returns the stored,
@@ -156,7 +165,7 @@ fn validate_registration(
 /// and logging the caller's id is not useful here.
 #[tracing::instrument(skip_all, name = "handler::registration_closed")]
 pub async fn get_registration_closed_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
+    templates: web::Data<dyn TemplateRenderer>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let context = AuthPageContext {
@@ -171,7 +180,7 @@ pub async fn get_registration_closed_page(
     };
 
     let body = render_page(
-        templates.get_ref().as_ref(),
+        templates.get_ref(),
         "registration_closed.html",
         &serde_json::to_value(&context)?,
     )?;
@@ -204,7 +213,7 @@ impl std::fmt::Debug for RegisterFormData {
     fields(registration_open = ?registration_open)
 )]
 pub async fn get_register_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
+    templates: web::Data<dyn TemplateRenderer>,
     registration_open: web::Data<bool>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -226,7 +235,7 @@ pub async fn get_register_page(
     };
 
     let body = render_page(
-        templates.get_ref().as_ref(),
+        templates.get_ref(),
         "register.html",
         &serde_json::to_value(&context)?,
     )?;
@@ -245,8 +254,8 @@ pub async fn get_register_page(
 pub async fn post_register(
     req: HttpRequest,
     form: web::Form<RegisterFormData>,
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     rate_limiter: web::Data<RateLimiter>,
     registration_open: web::Data<bool>,
     trusted_proxy: web::Data<TrustedProxy>,
@@ -264,7 +273,7 @@ pub async fn post_register(
     let decision = rate_limiter.check(&format!("register:{}", client_ip(&req, trusted_proxy.0)));
     if !decision.allowed {
         let body = render_page(
-            templates.get_ref().as_ref(),
+            templates.get_ref(),
             "register.html",
             &serde_json::json!({
                 "title": "Register", "header": "Halation",
@@ -295,7 +304,7 @@ pub async fn post_register(
         Ok(pair) => pair,
         Err(errors) => {
             let body = render_page(
-                templates.get_ref().as_ref(),
+                templates.get_ref(),
                 "register.html",
                 &context(errors),
             )?;
@@ -321,7 +330,7 @@ pub async fn post_register(
             .finish()),
         Err(UserStoreError::DuplicateUsername) => {
             let body = render_page(
-                templates.get_ref().as_ref(),
+                templates.get_ref(),
                 "register.html",
                 &context(vec!["That username is already taken.".into()]),
             )?;
@@ -329,7 +338,7 @@ pub async fn post_register(
         }
         Err(UserStoreError::DuplicateEmail) => {
             let body = render_page(
-                templates.get_ref().as_ref(),
+                templates.get_ref(),
                 "register.html",
                 &context(vec!["That email is already registered.".into()]),
             )?;
@@ -366,7 +375,7 @@ pub struct LoginQuery {
 
 #[tracing::instrument(skip_all, name = "handler::login_page")]
 pub async fn get_login_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
+    templates: web::Data<dyn TemplateRenderer>,
     identity: Option<Identity>,
     query: web::Query<LoginQuery>,
 ) -> Result<HttpResponse, Error> {
@@ -388,7 +397,7 @@ pub async fn get_login_page(
     };
 
     let body = render_page(
-        templates.get_ref().as_ref(),
+        templates.get_ref(),
         "login.html",
         &serde_json::to_value(&context)?,
     )?;
@@ -406,8 +415,8 @@ pub async fn get_login_page(
 pub async fn post_login(
     req: HttpRequest,
     form: web::Form<LoginFormData>,
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     rate_limiter: web::Data<RateLimiter>,
     trusted_proxy: web::Data<TrustedProxy>,
 ) -> Result<HttpResponse, Error> {
@@ -422,7 +431,7 @@ pub async fn post_login(
     let decision = rate_limiter.check(&format!("login:{ip}:{identifier}"));
     if !decision.allowed {
         let body = render_page(
-            templates.get_ref().as_ref(),
+            templates.get_ref(),
             "login.html",
             &serde_json::json!({
                 "title": "Log in", "header": "Halation",
@@ -452,7 +461,7 @@ pub async fn post_login(
     // the form never reveals which half failed.
     let failure = || async {
         let body = render_page(
-            templates.get_ref().as_ref(),
+            templates.get_ref(),
             "login.html",
             &login_context(vec!["Invalid username or password.".into()]),
         )
@@ -485,9 +494,9 @@ pub async fn post_login(
             .insert("login_user_agent", ua.to_str().unwrap_or_default())
             .map_err(crate::utils::e500)?;
     }
-    if let Some(ip) = req.peer_addr() {
+    if ip != "unknown" {
         session
-            .insert("login_ip", ip.to_string())
+            .insert("login_ip", &ip)
             .map_err(crate::utils::e500)?;
     }
 
@@ -554,12 +563,33 @@ mod tests {
         }
 
         #[test]
+        fn fly_client_ip_takes_precedence_over_x_forwarded_for() {
+            // Fly.io appends its own edge IP to X-Forwarded-For, so Fly-Client-IP
+            // must win over the tail of X-Forwarded-For.
+            assert_eq!(
+                super::client_ip_from_headers(
+                    Some("198.51.100.42"),
+                    Some("198.51.100.42, 66.241.124.1"),
+                ),
+                Some("198.51.100.42".to_string())
+            );
+        }
+
+        #[test]
+        fn invalid_fly_client_ip_falls_back_to_x_forwarded_for() {
+            assert_eq!(
+                super::client_ip_from_headers(Some("garbage"), Some("203.0.113.9")),
+                Some("203.0.113.9".to_string())
+            );
+        }
+
+        #[test]
         fn a_garbage_header_yields_none_rather_than_a_shared_bucket() {
             // Returning "unknown" for every malformed header would collapse
             // them into one rate-limit key — the original bug, reintroduced.
             for bad in ["not-an-ip", "999.999.999.999", "", "   "] {
                 assert_eq!(
-                    bad.trim().parse::<std::net::IpAddr>().ok(),
+                    super::client_ip_from_headers(Some(bad), Some(bad)),
                     None,
                     "{bad:?} should not parse as an address"
                 );

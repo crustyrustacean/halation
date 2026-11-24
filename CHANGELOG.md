@@ -2,6 +2,60 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.15.0] - 2026-11-23
+
+### Changed — Fly.io deployment target
+
+Retired the DigitalOcean droplet + Caddy + Docker Compose setup (`Caddyfile`
+and `docker-compose.yml` removed) in favor of **Fly.io**:
+
+- Added `fly.toml` with a persistent `/data` volume mount (`halation_data`),
+  HTTPS enforcement, `/health_check`, and `1gb` VM sizing for HEIC/JPEG
+  decoding.
+- Updated `Dockerfile` to use `lukemathwalker/cargo-chef:latest-rust-1-bookworm`,
+  pre-create `/data` owned by `appuser`, and default `APP_ENVIRONMENT=production`.
+- Updated `client_ip()` in auth handlers to prefer `Fly-Client-IP` (falling
+  back to the last `X-Forwarded-For` entry), and fixed `login_ip` session
+  metadata to record the resolved IP.
+- Added a production startup guard (`assert_production_ready`) that refuses to
+  boot with the checked-in dev signing key or a short key (< 64 bytes).
+- Rewrote `docs/DEPLOYMENT.md` and `cargo xtask deploy` for Fly.io.
+
+### Changed — `confik` + TOML configuration
+
+Replaced `config` (YAML) and `serde-aux` with `confik` (TOML + `secrecy`):
+
+- Migrated `configuration/{base,local,production}.yaml` to `.toml`.
+- `base.toml` and `production.toml` are loaded without `.allow_secrets()`, so
+  `confik` rejects secrets placed in checked-in production config files;
+  `local.toml` opts in for out-of-the-box local dev and tests.
+- Added configurable `application.static_dir` and `database.max_connections`.
+
+### Changed — Postgres swapped for embedded SQLite
+
+Leveraged the `DatabaseBackend` trait to replace Postgres with embedded SQLite
+(WAL mode, `foreign_keys = ON`, `busy_timeout = 5s`):
+
+- Replaced `src/database/postgres.rs` with `src/database/sqlite.rs`
+  (`SqliteDatabase`) and `PostgresSessionStore` with `SqliteSessionStore`.
+- Replaced Postgres migrations with a clean SQLite initial schema in
+  `migrations/20261123000000_initial.{up,down}.sql`.
+- Local dev (`cargo run`) and the full integration test suite (`cargo test`)
+  now run with zero Docker dependencies.
+
+### Changed — explicit `AppDeps` dependency injection & request IDs
+
+Aligned the server structure with the `AppDeps` pattern:
+
+- `src/bin/main.rs` constructs concrete dependencies (`SqliteDatabase`,
+  `TeraRenderer`, `StorageBackend`, `SqliteSessionStore`, `RateLimiter`,
+  `Geocoder`) and passes `AppDeps` to `Application::build`.
+- Route handlers now extract `web::Data<dyn DatabaseBackend>`,
+  `web::Data<dyn TemplateRenderer>`, and `web::Data<dyn StorageBackend>`
+  directly instead of `web::Data<Box<dyn ...>>`.
+- Added `x-request-id` UUID middleware in `src/telemetry.rs`, returned 404 for
+  missing `/static` files, and removed the unused `actix-cors` dependency.
+
 ## [0.14.2] - 2026-10-02
 
 ### Fixed — rate limiting keyed on the proxy's address

@@ -27,8 +27,8 @@ struct ProfilePageContext {
     fields(username = tracing::field::Empty)
 )]
 pub async fn get_profile(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {

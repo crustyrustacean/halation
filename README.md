@@ -2,40 +2,44 @@
 
 An early-Instagram-style photo sharing server — chronological, calm, and ad-free.
 
-Actix Web 4 · SQLx · Postgres · Tera · [Datastar](https://data-star.dev)
+Actix Web 4 · SQLx · SQLite · Tera · [Datastar](https://data-star.dev)
 
 ## Status
 
-Phase 0 (scaffold) — infrastructure only: configuration layering, telemetry,
-Postgres pool, storage backend abstraction (in-memory fake + OpenDAL S3/R2),
-Tera rendering, health endpoints. No features yet.
+Active development (`v0.15.0`). Implemented so far:
+
+- Configuration layering (`confik` + TOML), structured tracing telemetry, liveness (`/health_check`) and deep health (`/api/v1/health`)
+- Password auth (Argon2id), server-side SQLite sessions, rate limiting, and registration gate
+- Photo upload pipeline (JPEG/PNG/HEIC decoding, EXIF orientation + metadata extraction, reverse geocoding, owner-scoped S3/R2 derivatives)
+- Chronological global & hashtag feeds, user profiles, follow/unfollow social graph, Datastar fragment updates
 
 ## Deployment
 
-The compose stack is the deployment unit: app + postgres + Caddy
-(automatic HTTPS). On a fresh droplet:
+Halation deploys to **Fly.io** via [`fly.toml`](fly.toml) and [`Dockerfile`](Dockerfile),
+with embedded SQLite on a Fly persistent volume (`/data/halation.db`) and
+S3-compatible object storage (Cloudflare R2 or Fly Tigris). The app creates and
+migrates its database on boot.
 
 ```sh
-cargo xtask dev-db is NOT needed in production — the app creates
-and migrates its database on boot.
+fly deploy
+# or
+cargo xtask deploy --dry-run
 ```
 
-Full runbook: `docs/DEPLOYMENT.md`.
+Full runbook: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Development
 
-The app bootstraps its own database — it creates the database if missing
-and applies migrations on every boot. All you need is the dev Postgres
-container:
+The app bootstraps its own SQLite database (`data/halation.db`) and applies
+migrations on every boot — no Docker container required:
 
 ```sh
-cargo xtask dev-db            # first time: creates the container
 cargo run                     # visit http://127.0.0.1:8000
 ```
 
-`cargo xtask dev-db --clean` additionally sweeps throwaway test
-databases. Tests (`cargo test`) spin up their own throwaway databases
-per test and need the same container running.
+`cargo xtask dev-db --clean` resets the local dev database and sweeps any
+leftover temp test files. Tests (`cargo test`) spin up isolated throwaway
+SQLite files per test and clean them up on drop.
 
 Interactive behaviour needs a real browser, so it gets its own check:
 
@@ -50,7 +54,7 @@ the fragments and routes can all be correct while the browser never
 executes the JavaScript. Set `HALATION_E2E_DEBUG=1` to see the browser's
 console output and requests.
 
-`DATABASE_URL` in `.env` points at `localhost:5433` for sqlx-cli.
+`DATABASE_URL` in `.env` points at `sqlite://data/halation.db` for sqlx-cli.
 
 Much of this code was written with AI assistance. To find the places worth
 a second human look, there is a recorded technical-debt baseline:

@@ -30,11 +30,11 @@ COMMANDS:
     bump <version>         Set the version in Cargo.toml and open a new
                            CHANGELOG section for it (e.g. `bump 0.14.0`).
                            Does NOT commit or tag — that is your call.
-    dev-db [--clean]       Ensure the dev Postgres container and database
-                           exist. --clean also drops throwaway UUID-named
-                           databases left behind by `cargo test`.
-    deploy [--dry-run]     Print (or run) the droplet deploy. Refuses to touch
-                           production without --yes.
+    dev-db [--clean]       Ensure the local SQLite data/ directory exists.
+                           --clean resets data/halation.db and sweeps temp test
+                           databases.
+    deploy [--dry-run]     Print or run the Fly.io deploy (`fly deploy`).
+                           Refuses to touch production without --yes.
     e2e [--url <url>]     Drive a real browser against the app and click the
     [--db <name>]         feed's load-more button. Starts the app itself unless
     [--keep]               --url points at a running instance. Exits non-zero
@@ -44,7 +44,7 @@ COMMANDS:
 
 ENVIRONMENT:
     All commands run from the repository root and read the same layered config
-    the app does (configuration/*.yaml, then APP_* environment variables).
+    the app does (configuration/*.toml, then APP_* environment variables).
 ";
 
 fn main() {

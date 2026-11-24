@@ -1,0 +1,24 @@
+# Non-secret defaults shared across all environments.
+# Secrets (R2 keys, session signing key) are disallowed here by confik —
+# dev secrets live in local.toml; production secrets arrive via environment
+# variables (`fly secrets set`).
+
+[application]
+port = 8000
+host = "0.0.0.0"
+base_url = "http://localhost:8000"
+static_dir = "static"
+
+[database]
+path = "data/halation.db"
+max_connections = 5
+
+[storage]
+backend = "memory"
+
+[email]
+backend = "noop"
+
+[geocode]
+enabled = true
+base_url = "https://nominatim.openstreetmap.org"

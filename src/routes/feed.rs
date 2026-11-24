@@ -83,8 +83,8 @@ async fn render_feed_page(
     fields(before = tracing::field::Empty)
 )]
 pub async fn get_feed(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     query: web::Query<FeedQuery>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -94,8 +94,8 @@ pub async fn get_feed(
         tracing::field::display(query.before.as_deref().unwrap_or("-")),
     );
     render_feed_page(
-        templates.get_ref().as_ref(),
-        db.get_ref().as_ref(),
+        templates.get_ref(),
+        db.get_ref(),
         before,
         identity,
         "Feed",
@@ -112,8 +112,8 @@ pub async fn get_feed(
     fields(before = tracing::field::Empty)
 )]
 pub async fn get_recent(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     query: web::Query<FeedQuery>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -123,8 +123,8 @@ pub async fn get_recent(
         tracing::field::display(query.before.as_deref().unwrap_or("-")),
     );
     render_feed_page(
-        templates.get_ref().as_ref(),
-        db.get_ref().as_ref(),
+        templates.get_ref(),
+        db.get_ref(),
         before,
         identity,
         "Recent",
@@ -142,8 +142,8 @@ pub async fn get_recent(
     fields(tag = tracing::field::Empty)
 )]
 pub async fn get_hashtag_feed(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -177,8 +177,8 @@ pub async fn get_hashtag_feed(
     fields(before = tracing::field::Empty)
 )]
 pub async fn feed_fragment(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     query: web::Query<FeedQuery>,
 ) -> Result<Sse, Error> {
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
@@ -191,7 +191,7 @@ pub async fn feed_fragment(
         .await
         .map_err(crate::utils::e500)?;
 
-    let cards_html = render_cards(templates.get_ref().as_ref(), &cards)?;
+    let cards_html = render_cards(templates.get_ref(), &cards)?;
     let mut events = vec![
         PatchElements::new(cards_html)
             .selector("#load-more")
@@ -201,7 +201,7 @@ pub async fn feed_fragment(
 
     if has_more {
         let next_cursor = cards.last().map(|card| card.id.to_string());
-        let button_html = load_more_button(templates.get_ref().as_ref(), next_cursor)?;
+        let button_html = load_more_button(templates.get_ref(), next_cursor)?;
         events.push(
             PatchElements::new(button_html)
                 .selector("#load-more")

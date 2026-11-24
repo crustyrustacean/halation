@@ -10,9 +10,9 @@ use async_trait::async_trait;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub mod postgres;
+pub mod sqlite;
 
-pub use postgres::*;
+pub use sqlite::*;
 
 #[derive(Error)]
 pub enum DatabaseError {
@@ -39,9 +39,9 @@ impl ResponseError for DatabaseError {
 }
 
 /// Relational storage behind domain-shaped operations. Routes depend on
-/// this trait, never on `PgPool` — the Postgres implementation lives in
-/// `database::postgres`, and an alternative backend only has to satisfy
-/// the same contract.
+/// this trait, never on a concrete pool — the SQLite implementation lives in
+/// `database::sqlite`, and an alternative backend (e.g. Postgres later) only
+/// has to satisfy the same contract.
 ///
 /// Readers that address a single record return `Option` (unknown id is a
 /// normal outcome); `DatabaseError::NotFound` stays reserved for methods

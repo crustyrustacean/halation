@@ -153,7 +153,7 @@ async fn load_more_fragment_paginates_and_exhausts() {
 
     // The next cursor is the 10th-newest post
     let tenth: Uuid = sqlx::query_scalar(
-        "SELECT id FROM posts ORDER BY created_at DESC, id DESC OFFSET 9 LIMIT 1",
+        "SELECT id FROM posts ORDER BY created_at DESC, id DESC LIMIT 1 OFFSET 9",
     )
     .fetch_one(&app.db_pool)
     .await

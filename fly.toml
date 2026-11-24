@@ -1,0 +1,40 @@
+# fly.toml — Fly.io deployment configuration for Halation.
+# See docs/DEPLOYMENT.md for first-time setup, volume creation, R2/Tigris
+# secrets, and custom domain configuration.
+
+app = "halation"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENVIRONMENT = "production"
+  APP_APPLICATION__HOST = "0.0.0.0"
+  APP_APPLICATION__PORT = "8000"
+  APP_DATABASE__PATH = "/data/halation.db"
+  APP_STORAGE__BACKEND = "s3"
+  APP_GEOCODE__ENABLED = "true"
+
+[mounts]
+  source = "halation_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health_check"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

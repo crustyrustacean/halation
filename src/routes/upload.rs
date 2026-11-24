@@ -30,7 +30,7 @@ fn redirect_login() -> HttpResponse {
 }
 
 pub async fn get_upload_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
+    templates: web::Data<dyn TemplateRenderer>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let identity = match identity {
@@ -53,9 +53,9 @@ pub async fn get_upload_page(
 
 pub async fn post_upload(
     MultipartForm(form): MultipartForm<UploadForm>,
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
-    storage: web::Data<Box<dyn crate::storage::StorageBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
+    storage: web::Data<dyn crate::storage::StorageBackend>,
     geocoder: web::Data<Geocoder>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
@@ -114,7 +114,7 @@ pub async fn post_upload(
         let raw = std::fs::read(file.file.path())
             .map_err(|e| crate::utils::e500(format!("temp file vanished: {e}")))?;
 
-        match media::process_and_store(storage.get_ref().as_ref(), user_id, &raw).await {
+        match media::process_and_store(storage.get_ref(), user_id, &raw).await {
             Ok(stored) => stored_media.push(stored),
             Err(MediaError::InvalidImage) => {
                 return render_error(
@@ -165,8 +165,8 @@ pub async fn post_upload(
 /// GET /p/{post_id} — the post permalink: photo set + caption + owner +
 /// EXIF meta row (loaded via `DatabaseBackend::load_post_page`).
 pub async fn get_post_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<Uuid>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {

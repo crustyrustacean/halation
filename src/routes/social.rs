@@ -47,8 +47,8 @@ fn button_swap(html: String) -> Sse {
     fields(target = tracing::field::Empty)
 )]
 pub async fn follow_user(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<Either<HttpResponse, Sse>, Error> {
@@ -75,7 +75,7 @@ pub async fn follow_user(
         .await
         .map_err(crate::utils::e500)?;
 
-    let html = follow_button(templates.get_ref().as_ref(), &username, true)?;
+    let html = follow_button(templates.get_ref(), &username, true)?;
     Ok(Either::Right(button_swap(html)))
 }
 
@@ -86,8 +86,8 @@ pub async fn follow_user(
     fields(target = tracing::field::Empty)
 )]
 pub async fn unfollow_user(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<Either<HttpResponse, Sse>, Error> {
@@ -109,7 +109,7 @@ pub async fn unfollow_user(
         .await
         .map_err(crate::utils::e500)?;
 
-    let html = follow_button(templates.get_ref().as_ref(), &username, false)?;
+    let html = follow_button(templates.get_ref(), &username, false)?;
     Ok(Either::Right(button_swap(html)))
 }
 
@@ -168,16 +168,16 @@ async fn render_social_list(
     fields(username = tracing::field::Empty)
 )]
 pub async fn get_followers_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
     tracing::Span::current().record("username", tracing::field::display(&username));
     render_social_list(
-        templates.get_ref().as_ref(),
-        db.get_ref().as_ref(),
+        templates.get_ref(),
+        db.get_ref(),
         &username,
         "followers",
         identity,
@@ -192,16 +192,16 @@ pub async fn get_followers_page(
     fields(username = tracing::field::Empty)
 )]
 pub async fn get_following_page(
-    templates: web::Data<Box<dyn TemplateRenderer>>,
-    db: web::Data<Box<dyn DatabaseBackend>>,
+    templates: web::Data<dyn TemplateRenderer>,
+    db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
 ) -> Result<HttpResponse, Error> {
     let username = path.into_inner();
     tracing::Span::current().record("username", tracing::field::display(&username));
     render_social_list(
-        templates.get_ref().as_ref(),
-        db.get_ref().as_ref(),
+        templates.get_ref(),
+        db.get_ref(),
         &username,
         "following",
         identity,

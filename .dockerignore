@@ -9,6 +9,7 @@ tests
 # kept out of the *image* instead: the Dockerfile names its binaries
 # explicitly (`--bin halation --bin backfill_media_keys`) and copies only
 # those, so xtask is never compiled or shipped.
-docker-compose.yml
+fly.toml
+docs
 CHANGELOG.md
 README.md

@@ -17,8 +17,8 @@ struct HealthReport {
 /// GET /api/v1/health — deep health for monitoring: probes every dependency.
 /// JSON is deliberate here: the consumers are machines, not browsers.
 pub async fn deep_health(
-    db: Data<Box<dyn DatabaseBackend>>,
-    storage: Data<Box<dyn StorageBackend>>,
+    db: Data<dyn DatabaseBackend>,
+    storage: Data<dyn StorageBackend>,
 ) -> HttpResponse {
     let database_ok = db.ping().await.is_ok();
     let storage_ok = storage.health_check().await.is_ok();
