@@ -19,25 +19,25 @@ path = "src/bin/backfill_media_keys.rs"
 
 [dependencies]
 actix-files = "0.7"
-actix-identity = "0.9"
+actix-identity = "0.10"
 actix-multipart = { version = "0.8", features = ["tempfile"] }
-actix-session = { version = "0.11", features = ["cookie-session"] }
+actix-session = { version = "0.12", features = ["cookie-session"] }
+actix-sse = "0.3"
 actix-web = "4"
 anyhow = "1"
-argon2 = { version = "0.5", features = ["std"] }
+argon2 = "0.6"
 dotenvy = "0.15"
-sha2 = "0.10"
+sha2 = "0.11"
 async-trait = "0.1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 confik = { version = "0.15", features = ["secrecy"] }
-datastar = { git = "https://github.com/crustyrustacean/datastar-rust.git", branch = "feat/actix-adapter", features = ["actix"] }
+datastar = { version = "0.4", features = ["actix-web"] }
 flux-limiter = "0.8"
 heic = "0.1"
 image = "0.25"
+jiff = "1"
 kamadak-exif = "0.6"
-log = "0.4"
-opendal = { version = "0.58", features = ["services-fs", "services-s3"] }
+opendal = { version = "0.59", features = ["services-fs", "services-s3"] }
 secrecy = { version = "0.10", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "query"] }
 serde = { version = "1", features = ["derive"] }
@@ -47,7 +47,6 @@ sqlx = { version = "0.9", default-features = false, features = [
     "macros",
     "sqlite",
     "uuid",
-    "chrono",
     "migrate",
 ] }
 tera = { version = "2", features = ["fast", "glob_fs"] }

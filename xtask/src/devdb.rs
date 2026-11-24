@@ -35,10 +35,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
         sweep_temp_test_dbs()?;
     }
 
-    println!(
-        "SQLite data directory is ready at {}.",
-        data_dir.display()
-    );
+    println!("SQLite data directory is ready at {}.", data_dir.display());
     println!("No container needed — the app creates and migrates data/halation.db on `cargo run`.");
     Ok(())
 }

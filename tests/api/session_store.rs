@@ -3,7 +3,8 @@
 use crate::helpers::spawn_app;
 use actix_session::storage::{SessionKey, SessionStore};
 use halation::authentication::SqliteSessionStore;
-use std::collections::HashMap;
+use halation::database::UtcTimestamp;
+use serde_json::{Map, Value};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -24,9 +25,9 @@ async fn session_store_round_trips_through_sqlite() {
     .await
     .expect("user seed should succeed");
 
-    let mut state: HashMap<String, String> = HashMap::new();
-    state.insert("user_id".to_string(), user_id.to_string());
-    state.insert("theme".to_string(), "dark".to_string());
+    let mut state: Map<String, Value> = Map::new();
+    state.insert("user_id".to_string(), Value::String(user_id.to_string()));
+    state.insert("theme".to_string(), Value::String("dark".to_string()));
     let ttl = actix_web::cookie::time::Duration::minutes(15);
 
     // Act — save → load
@@ -43,7 +44,7 @@ async fn session_store_round_trips_through_sqlite() {
 
     // Assert — the state round-trips intact
     assert_eq!(state, loaded);
-    let persisted: (Option<Uuid>, Option<chrono::DateTime<chrono::Utc>>) =
+    let persisted: (Option<Uuid>, Option<UtcTimestamp>) =
         sqlx::query_as("SELECT user_id, expires_at FROM sessions WHERE id = $1")
             .bind(key.as_ref())
             .fetch_one(&app.db_pool)
@@ -63,7 +64,7 @@ async fn session_store_round_trips_through_sqlite() {
 
     // Act — update changes the state in place
     let mut updated = state.clone();
-    updated.insert("theme".to_string(), "light".to_string());
+    updated.insert("theme".to_string(), Value::String("light".to_string()));
     store
         .update(rebuild(&key_string), updated.clone(), &ttl)
         .await
@@ -97,7 +98,8 @@ async fn expired_sessions_are_swept_on_load() {
     let app = spawn_app().await;
     let store = SqliteSessionStore::new(app.db_pool.clone());
 
-    let state: HashMap<String, String> = HashMap::from([("k".to_string(), "v".to_string())]);
+    let mut state: Map<String, Value> = Map::new();
+    state.insert("k".to_string(), Value::String("v".to_string()));
     let negative_ttl = actix_web::cookie::time::Duration::seconds(-1);
 
     // Act — save with an already-elapsed ttl, then load

@@ -14,6 +14,50 @@ pub mod sqlite;
 
 pub use sqlite::*;
 
+/// A UTC `jiff::Timestamp` encoded in SQLite `TEXT` columns as fixed-width
+/// RFC 3339 (`%Y-%m-%dT%H:%M:%S%.6f+00:00`) so lexicographical ordering
+/// matches chronological ordering and matches SQLite's `DEFAULT` expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UtcTimestamp(pub jiff::Timestamp);
+
+impl UtcTimestamp {
+    pub fn now() -> Self {
+        Self(jiff::Timestamp::now())
+    }
+
+    pub fn format(&self, fmt: &str) -> String {
+        self.0.strftime(fmt).to_string()
+    }
+}
+
+impl sqlx::Type<sqlx::Sqlite> for UtcTimestamp {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <String as sqlx::Type<sqlx::Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for UtcTimestamp {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        let raw = <String as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
+        let ts: jiff::Timestamp = raw.parse()?;
+        Ok(Self(ts))
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for UtcTimestamp {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <sqlx::Sqlite as sqlx::database::Database>::ArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        let formatted = self.0.strftime("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string();
+        <String as sqlx::Encode<sqlx::Sqlite>>::encode(formatted, buf)
+    }
+}
+
 #[derive(Error)]
 pub enum DatabaseError {
     #[error("record not found: {0}")]

@@ -245,10 +245,9 @@ fn body_is_complete(raw: &[u8]) -> bool {
         if let Some(value) = line
             .strip_prefix("Content-Length:")
             .or_else(|| line.strip_prefix("content-length:"))
+            && let Ok(expected) = value.trim().parse::<usize>()
         {
-            if let Ok(expected) = value.trim().parse::<usize>() {
-                return body.len() >= expected;
-            }
+            return body.len() >= expected;
         }
     }
     // No length and no chunking: the server will close when it is done.
@@ -684,10 +683,10 @@ fn drain_events(ws: &mut WebSocket) -> Vec<String> {
         if frame.contains("\"id\":") {
             continue; // a reply to one of our own calls
         }
-        if let Some(url) = json_field(&frame, "url") {
-            if url.contains("/fragments/") || url.contains("datastar") {
-                out.push(format!("REQUEST {url}"));
-            }
+        if let Some(url) = json_field(&frame, "url")
+            && (url.contains("/fragments/") || url.contains("datastar"))
+        {
+            out.push(format!("REQUEST {url}"));
         }
         if let Some(text) = json_field(&frame, "text") {
             let t: String = text.chars().take(220).collect();

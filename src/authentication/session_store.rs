@@ -1,14 +1,15 @@
 // src/authentication/session_store.rs
 
 // dependencies
+use crate::database::UtcTimestamp;
 use actix_session::storage::{
     LoadError, SaveError, SessionKey, SessionStore, UpdateError, generate_session_key,
 };
 use actix_web::cookie::time::Duration as CookieDuration;
 use anyhow::anyhow;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use jiff::{SignedDuration, Timestamp};
+use serde_json::{Map, Value};
 use sqlx::SqlitePool;
-use std::collections::HashMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -26,9 +27,12 @@ impl SqliteSessionStore {
         Self { pool }
     }
 
-    fn expires_at_from(ttl: &CookieDuration) -> Option<DateTime<Utc>> {
+    fn expires_at_from(ttl: &CookieDuration) -> Option<UtcTimestamp> {
         let seconds = ttl.whole_seconds().max(0);
-        Some(Utc::now() + ChronoDuration::seconds(seconds))
+        Timestamp::now()
+            .checked_add(SignedDuration::from_secs(seconds))
+            .ok()
+            .map(UtcTimestamp)
     }
 }
 
@@ -36,8 +40,8 @@ impl SessionStore for SqliteSessionStore {
     async fn load(
         &self,
         session_key: &SessionKey,
-    ) -> Result<Option<HashMap<String, String>>, LoadError> {
-        let row = sqlx::query_as::<_, (String, Option<DateTime<Utc>>)>(
+    ) -> Result<Option<Map<String, Value>>, LoadError> {
+        let row = sqlx::query_as::<_, (String, Option<UtcTimestamp>)>(
             "SELECT state, expires_at FROM sessions WHERE id = ?1",
         )
         .bind(session_key.as_ref())
@@ -49,7 +53,7 @@ impl SessionStore for SqliteSessionStore {
             None => Ok(None),
             Some((state_json, expires_at)) => {
                 // An expired row is a miss: sweep it and answer None.
-                if expires_at.is_some_and(|at| at < Utc::now()) {
+                if expires_at.is_some_and(|at| at.0 < Timestamp::now()) {
                     sqlx::query("DELETE FROM sessions WHERE id = ?1")
                         .bind(session_key.as_ref())
                         .execute(&self.pool)
@@ -59,7 +63,7 @@ impl SessionStore for SqliteSessionStore {
                 }
 
                 let state =
-                    serde_json::from_str::<HashMap<String, String>>(&state_json).map_err(|e| {
+                    serde_json::from_str::<Map<String, Value>>(&state_json).map_err(|e| {
                         LoadError::Deserialization(anyhow!("Invalid session state: {e}"))
                     })?;
                 Ok(Some(state))
@@ -69,16 +73,19 @@ impl SessionStore for SqliteSessionStore {
 
     async fn save(
         &self,
-        session_state: HashMap<String, String>,
+        session_state: Map<String, Value>,
         ttl: &CookieDuration,
     ) -> Result<SessionKey, SaveError> {
         let session_key = generate_session_key();
         let state_json = serde_json::to_string(&session_state)
             .map_err(|e| SaveError::Serialization(anyhow!("Failed to encode session: {e}")))?;
         let user_id = extracted_uuid(&session_state, "user_id");
-        let user_agent = session_state.get("login_user_agent").cloned();
+        let user_agent = session_state
+            .get("login_user_agent")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let ip = extracted_ip(&session_state, "login_ip");
-        let now = Utc::now();
+        let now = UtcTimestamp::now();
 
         sqlx::query(
             "INSERT INTO sessions (id, user_id, state, created_at, expires_at, last_seen_at, user_agent, ip)
@@ -102,13 +109,13 @@ impl SessionStore for SqliteSessionStore {
     async fn update(
         &self,
         session_key: SessionKey,
-        session_state: HashMap<String, String>,
+        session_state: Map<String, Value>,
         ttl: &CookieDuration,
     ) -> Result<SessionKey, UpdateError> {
         let state_json = serde_json::to_string(&session_state)
             .map_err(|e| UpdateError::Serialization(anyhow!("Failed to encode session: {e}")))?;
         let user_id = extracted_uuid(&session_state, "user_id");
-        let now = Utc::now();
+        let now = UtcTimestamp::now();
 
         // Upsert: actix may update a session whose row we swept; recreate it.
         sqlx::query(
@@ -160,19 +167,13 @@ impl SessionStore for SqliteSessionStore {
 /// Registration/login handlers plant `user_id` (plus login-time metadata)
 /// into the session state; the store lifts it into a queryable column so
 /// sessions can be listed and revoked per account.
-///
-/// Values arrive through two encodings: `Session::insert` JSON-encodes
-/// (a Uuid reads back as `\"...\"`), while direct store writes use raw
-/// strings. Try JSON first, fall back to raw.
-fn extracted_uuid(state: &HashMap<String, String>, key: &str) -> Option<Uuid> {
+fn extracted_uuid(state: &Map<String, Value>, key: &str) -> Option<Uuid> {
     let raw = state.get(key)?;
-    serde_json::from_str::<Uuid>(raw)
+    serde_json::from_value::<Uuid>(raw.clone())
         .ok()
-        .or_else(|| raw.parse().ok())
+        .or_else(|| raw.as_str().and_then(|s| s.parse().ok()))
 }
 
-fn extracted_ip(state: &HashMap<String, String>, key: &str) -> Option<IpAddr> {
-    let raw = state.get(key)?;
-    let decoded = serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.clone());
-    decoded.parse().ok()
+fn extracted_ip(state: &Map<String, Value>, key: &str) -> Option<IpAddr> {
+    state.get(key)?.as_str()?.parse().ok()
 }

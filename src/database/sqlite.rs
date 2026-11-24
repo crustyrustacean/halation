@@ -1,5 +1,6 @@
 // src/database/sqlite.rs
 
+use super::UtcTimestamp;
 use crate::authentication::{NewUser, User, UserStoreError};
 use crate::configuration::DatabaseSettings;
 use crate::database::{DatabaseBackend, DatabaseError};
@@ -10,7 +11,6 @@ use crate::posts::{
 use crate::services::media::StoredMedia;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use uuid::Uuid;
@@ -78,17 +78,17 @@ type PostRow = (
     Uuid,
     Option<String>,
     String,
-    DateTime<Utc>,
+    UtcTimestamp,
     Option<String>,
 );
 /// `post_media ⋈ media` for a permalink: media id, EXIF JSON (as text), version.
 type MediaExifRow = (Uuid, Option<String>, i32);
 /// A live `users` row: id, username, display name, bio, created_at.
-type ProfileRow = (Uuid, String, Option<String>, Option<String>, DateTime<Utc>);
+type ProfileRow = (Uuid, String, Option<String>, Option<String>, UtcTimestamp);
 /// Profile grid rows: post id, first media id (posts without media yield NULLs).
 type ProfileThumbRow = (Uuid, Option<Uuid>, Option<i32>);
 /// Feed page rows: post id, caption, location, username, created_at.
-type FeedRow = (Uuid, Option<String>, Option<String>, String, DateTime<Utc>);
+type FeedRow = (Uuid, Option<String>, Option<String>, String, UtcTimestamp);
 /// `post_media ⋈ media` for feeds: post id, media id, version.
 type MediaVersionRow = (Uuid, Uuid, i32);
 /// `post_hashtags ⋈ hashtags`: post id, tag.
@@ -111,7 +111,7 @@ impl DatabaseBackend for SqliteDatabase {
 
     async fn insert_user(&self, new_user: NewUser) -> Result<User, UserStoreError> {
         let id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = UtcTimestamp::now();
 
         sqlx::query_as::<_, User>(
             "INSERT INTO users (id, username, email, password_hash, created_at, updated_at)
@@ -186,7 +186,7 @@ impl DatabaseBackend for SqliteDatabase {
         )
         .bind(follower_id)
         .bind(followee_id)
-        .bind(Utc::now())
+        .bind(UtcTimestamp::now())
         .execute(&self.pool)
         .await
         .map_err(|e| DatabaseError::Operation(anyhow!("Failed to follow: {e}")))?;
@@ -260,7 +260,7 @@ impl DatabaseBackend for SqliteDatabase {
             })?;
 
         let post_id = Uuid::new_v4();
-        let now = Utc::now();
+        let now = UtcTimestamp::now();
 
         sqlx::query(
             "INSERT INTO posts (id, user_id, caption, location_name, created_at)
@@ -585,7 +585,7 @@ async fn account_list(
 /// sharing a timestamp are never skipped or duplicated.
 async fn load_page(
     pool: &SqlitePool,
-    before: Option<(DateTime<Utc>, Uuid)>,
+    before: Option<(UtcTimestamp, Uuid)>,
     tag: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<PostCard>, bool), DatabaseError> {
@@ -599,8 +599,7 @@ async fn load_page(
          ORDER BY p.created_at DESC, p.id DESC
          LIMIT ?3";
 
-    const TAGGED_FEED: &str =
-        "SELECT p.id, p.caption, p.location_name, u.username, p.created_at
+    const TAGGED_FEED: &str = "SELECT p.id, p.caption, p.location_name, u.username, p.created_at
          FROM posts p
          JOIN users u ON u.id = p.user_id
          JOIN post_hashtags ph ON ph.post_id = p.id
@@ -724,11 +723,11 @@ async fn load_hashtags(
 async fn resolve_cursor(
     pool: &SqlitePool,
     before: Option<Uuid>,
-) -> Result<Option<(DateTime<Utc>, Uuid)>, DatabaseError> {
+) -> Result<Option<(UtcTimestamp, Uuid)>, DatabaseError> {
     let Some(before) = before else {
         return Ok(None);
     };
-    let row: Option<DateTime<Utc>> =
+    let row: Option<UtcTimestamp> =
         sqlx::query_scalar("SELECT created_at FROM posts WHERE id = ?1")
             .bind(before)
             .fetch_optional(pool)

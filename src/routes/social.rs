@@ -4,8 +4,8 @@
 use crate::database::DatabaseBackend;
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
-use actix_web::{Either, Error, HttpResponse, web};
-use datastar::actix::Sse;
+use actix_sse::{Event, Sse};
+use actix_web::{Either, Error, HttpResponse, Responder, web};
 use datastar::prelude::{ElementPatchMode, PatchElements};
 use uuid::Uuid;
 
@@ -31,13 +31,12 @@ fn follow_button(
         .map_err(crate::utils::e500)
 }
 
-fn button_swap(html: String) -> Sse {
-    Sse::from(
-        PatchElements::new(html)
-            .selector("#follow-btn")
-            .mode(ElementPatchMode::Replace)
-            .into_datastar_event(),
-    )
+fn button_swap(html: String) -> impl Responder {
+    let event: Event = PatchElements::new(html)
+        .selector("#follow-btn")
+        .mode(ElementPatchMode::Replace)
+        .write_as_actix_web_sse_event();
+    Sse::from_infallible_stream(tokio_stream::iter([event]))
 }
 
 /// POST /fragments/users/{username}/follow — follow the account.
@@ -51,7 +50,7 @@ pub async fn follow_user(
     db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
-) -> Result<Either<HttpResponse, Sse>, Error> {
+) -> Result<Either<HttpResponse, impl Responder>, Error> {
     let Some(viewer) = viewer_id(identity.as_ref())? else {
         return Ok(Either::Left(HttpResponse::Unauthorized().finish()));
     };
@@ -90,7 +89,7 @@ pub async fn unfollow_user(
     db: web::Data<dyn DatabaseBackend>,
     path: web::Path<String>,
     identity: Option<Identity>,
-) -> Result<Either<HttpResponse, Sse>, Error> {
+) -> Result<Either<HttpResponse, impl Responder>, Error> {
     let Some(viewer) = viewer_id(identity.as_ref())? else {
         return Ok(Either::Left(HttpResponse::Unauthorized().finish()));
     };

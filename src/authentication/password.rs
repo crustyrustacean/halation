@@ -2,7 +2,7 @@
 // dependencies
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 use secrecy::{ExposeSecret, SecretString};
 
@@ -68,9 +68,7 @@ impl sqlx::Type<sqlx::Sqlite> for PasswordHashSecret {
 }
 
 impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for PasswordHashSecret {
-    fn decode(
-        value: sqlx::sqlite::SqliteValueRef<'r>,
-    ) -> Result<Self, sqlx::error::BoxDynError> {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let raw = <String as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
         Ok(Self::from(SecretString::from(raw)))
     }
@@ -89,9 +87,8 @@ impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for PasswordHashSecret {
 /// opaque handle to the PHC-formatted string — salt included, nothing else
 /// to keep.
 pub fn hash_password(password: &str) -> Result<PasswordHashSecret, anyhow::Error> {
-    let salt = SaltString::generate(&mut OsRng);
     let password_hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)?
+        .hash_password(password.as_bytes())?
         .to_string();
     Ok(PasswordHashSecret::from(SecretString::from(password_hash)))
 }

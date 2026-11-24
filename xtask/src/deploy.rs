@@ -88,7 +88,9 @@ fn plan(health_url: &str) -> Vec<String> {
     vec![
         "fly deploy".to_string(),
         "fly status".to_string(),
-        format!("curl -fsSL {health_url}  (confirm version matches Cargo.toml and db/storage are ok)"),
+        format!(
+            "curl -fsSL {health_url}  (confirm version matches Cargo.toml and db/storage are ok)"
+        ),
     ]
 }
 
@@ -117,10 +119,7 @@ fn run_cmd(root: &Path, program: &str, args: &[&str]) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "{program} {} exited with {status}",
-            args.join(" ")
-        ))
+        Err(format!("{program} {} exited with {status}", args.join(" ")))
     }
 }
 

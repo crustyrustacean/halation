@@ -37,9 +37,9 @@ async fn main() -> anyhow::Result<()> {
     let storage: Arc<dyn StorageBackend> = match configuration.storage.backend.as_str() {
         "s3" | "r2" => Arc::new(OpendalStorageBackend::new(&configuration.storage)?),
         "memory" => Arc::new(InMemoryStorageBackend::new()),
-        other => anyhow::bail!(
-            "Unsupported storage backend: '{other}'. Use 'memory', 's3', or 'r2'."
-        ),
+        other => {
+            anyhow::bail!("Unsupported storage backend: '{other}'. Use 'memory', 's3', or 'r2'.")
+        }
     };
 
     let rate_limiter = Arc::new(RateLimiter::new(AUTH_RATE_PER_SECOND, AUTH_BURST_CAPACITY)?);

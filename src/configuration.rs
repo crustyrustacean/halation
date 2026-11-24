@@ -541,7 +541,8 @@ mod tests {
     #[test]
     fn test_run_with_s3_storage_is_refused() {
         let settings = settings_with("s3", true);
-        let message = assert_no_remote_storage(&settings).expect_err("a test run must not reach R2");
+        let message =
+            assert_no_remote_storage(&settings).expect_err("a test run must not reach R2");
         assert!(message.contains("s3"), "names the backend: {message}");
         assert!(
             message.contains("halation-photos"),

@@ -71,7 +71,10 @@ fn parse_ip_header(raw: &str) -> Option<std::net::IpAddr> {
         .ok()
 }
 
-fn client_ip_from_headers(fly_client_ip: Option<&str>, x_forwarded_for: Option<&str>) -> Option<String> {
+fn client_ip_from_headers(
+    fly_client_ip: Option<&str>,
+    x_forwarded_for: Option<&str>,
+) -> Option<String> {
     if let Some(ip) = fly_client_ip.and_then(parse_ip_header) {
         return Some(ip.to_string());
     }
@@ -303,11 +306,7 @@ pub async fn post_register(
     {
         Ok(pair) => pair,
         Err(errors) => {
-            let body = render_page(
-                templates.get_ref(),
-                "register.html",
-                &context(errors),
-            )?;
+            let body = render_page(templates.get_ref(), "register.html", &context(errors))?;
             return Ok(html(
                 actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
                 body,

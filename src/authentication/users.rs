@@ -1,7 +1,7 @@
 // src/authentication/users.rs
 // dependencies
 use crate::authentication::password::PasswordHashSecret;
-use chrono::{DateTime, Utc};
+use crate::database::UtcTimestamp;
 use uuid::Uuid;
 
 /// The live-account row.
@@ -24,9 +24,9 @@ pub struct User {
     pub password_hash: PasswordHashSecret,
     pub display_name: Option<String>,
     pub bio: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: UtcTimestamp,
+    pub updated_at: UtcTimestamp,
+    pub deleted_at: Option<UtcTimestamp>,
 }
 
 impl std::fmt::Debug for User {

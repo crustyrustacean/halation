@@ -5,8 +5,8 @@ use crate::database::DatabaseBackend;
 use crate::posts::{FEED_PAGE_SIZE, PostCard};
 use crate::template::TemplateRenderer;
 use actix_identity::Identity;
-use actix_web::{Error, HttpResponse, web};
-use datastar::actix::Sse;
+use actix_sse::{Event, Sse};
+use actix_web::{Error, HttpResponse, Responder, web};
 use datastar::prelude::{ElementPatchMode, PatchElements};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -180,7 +180,7 @@ pub async fn feed_fragment(
     templates: web::Data<dyn TemplateRenderer>,
     db: web::Data<dyn DatabaseBackend>,
     query: web::Query<FeedQuery>,
-) -> Result<Sse, Error> {
+) -> Result<impl Responder, Error> {
     let before = query.before.as_ref().and_then(|s| Uuid::parse_str(s).ok());
     tracing::Span::current().record(
         "before",
@@ -192,11 +192,11 @@ pub async fn feed_fragment(
         .map_err(crate::utils::e500)?;
 
     let cards_html = render_cards(templates.get_ref(), &cards)?;
-    let mut events = vec![
+    let mut events: Vec<Event> = vec![
         PatchElements::new(cards_html)
             .selector("#load-more")
             .mode(ElementPatchMode::Before)
-            .into_datastar_event(),
+            .write_as_actix_web_sse_event(),
     ];
 
     if has_more {
@@ -206,11 +206,11 @@ pub async fn feed_fragment(
             PatchElements::new(button_html)
                 .selector("#load-more")
                 .mode(ElementPatchMode::Replace)
-                .into_datastar_event(),
+                .write_as_actix_web_sse_event(),
         );
     } else {
-        events.push(PatchElements::new_remove("#load-more").into_datastar_event());
+        events.push(PatchElements::new_remove("#load-more").write_as_actix_web_sse_event());
     }
 
-    Ok(Sse::new(tokio_stream::iter(events)))
+    Ok(Sse::from_infallible_stream(tokio_stream::iter(events)))
 }
