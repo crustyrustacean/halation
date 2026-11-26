@@ -2,6 +2,23 @@
 
 All notable changes to the Halation project will be documented in this file.
 
+## [0.15.1] - 2026-11-25
+
+### Changed — `flux-limiter` 0.9 & dependency updates
+
+- Upgraded `flux-limiter` from `0.8.3` to `0.9.0` and switched `RateLimiter` to
+  `MonotonicClock::new()`, making login/registration rate limiting immune to
+  backwards wall-clock steps (NTP adjustments or Fly Machine suspend/resume)
+  and picking up lock-free atomic updates on the hot path.
+- Updated 21 lockfile dependencies via `cargo update`.
+
+### Added — CI pipeline gating Fly.io deploys
+
+- Added reusable `.github/workflows/ci.yml` running `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
+  and `rustsec/audit-check@v2`.
+- Gated `.github/workflows/deploy.yml` on `ci` passing before deploying to Fly.io.
+
 ## [0.15.0] - 2026-11-23
 
 ### Changed — Fly.io deployment target

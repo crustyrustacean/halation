@@ -1,7 +1,7 @@
 // src/services/rate_limiter.rs
 
 // dependencies
-use flux_limiter::{FluxLimiter, FluxLimiterConfig, SystemClock};
+use flux_limiter::{FluxLimiter, FluxLimiterConfig, MonotonicClock};
 
 /// GCRA rate limiter shared by the login and registration forms, keyed by
 /// `"<form>:<ip>:<identifier>"`. Wraps flux-limiter's lock-free limiter;
@@ -16,7 +16,7 @@ impl RateLimiter {
     /// spread across 15 minutes, burst 5.
     pub fn new(rate_per_second: f64, burst_capacity: f64) -> Result<Self, anyhow::Error> {
         let config = FluxLimiterConfig::new(rate_per_second, burst_capacity);
-        let limiter = FluxLimiter::with_config(config, SystemClock)?;
+        let limiter = FluxLimiter::with_config(config, MonotonicClock::new())?;
         Ok(Self { limiter })
     }
 

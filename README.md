@@ -6,7 +6,7 @@ Actix Web 4 · SQLx · SQLite · Tera · [Datastar](https://data-star.dev)
 
 ## Status
 
-Active development (`v0.15.0`). Implemented so far:
+Active development (`v0.15.1`). Implemented so far:
 
 - Configuration layering (`confik` + TOML), structured tracing telemetry, liveness (`/health_check`) and deep health (`/api/v1/health`)
 - Password auth (Argon2id), server-side SQLite sessions, rate limiting, and registration gate

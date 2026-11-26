@@ -1,6 +1,6 @@
 [package]
 name = "halation"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2024"
 authors = ["Jeffery D. Mitchell", "<crusty.rustacean@gmail.com>"]
 description = "An early-Instagram-style photo sharing server — chronological, calm, and ad-free"
@@ -32,7 +32,7 @@ async-trait = "0.1"
 bytes = "1"
 confik = { version = "0.15", features = ["secrecy"] }
 datastar = { version = "0.4", features = ["actix-web"] }
-flux-limiter = "0.8"
+flux-limiter = "0.9"
 heic = "0.1"
 image = "0.25"
 jiff = "1"
