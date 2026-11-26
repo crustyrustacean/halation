@@ -1,0 +1,10 @@
+# cargo-audit configuration
+# See https://rustsec.org/
+
+[advisories]
+ignore = [
+    # cookie 0.16.2 (transitive via actix-web 4.x): "Private cookie nonces can
+    # repeat in processes that fork". Halation runs on Actix worker threads and
+    # never calls fork(). Remove once actix-web upgrades past cookie 0.16.
+    "RUSTSEC-2026-0594",
+]

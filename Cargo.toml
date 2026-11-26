@@ -23,7 +23,14 @@ actix-identity = "0.10"
 actix-multipart = { version = "0.8", features = ["tempfile"] }
 actix-session = { version = "0.12", features = ["cookie-session"] }
 actix-sse = "0.3"
-actix-web = "4"
+actix-web = { version = "4", default-features = false, features = [
+    "macros",
+    "compress-brotli",
+    "compress-gzip",
+    "compress-zstd",
+    "cookies",
+    "unicode",
+] }
 anyhow = "1"
 argon2 = "0.6"
 dotenvy = "0.15"
