@@ -334,9 +334,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.14"
+version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54dae3d1d7b8956f3506c4e999a74e77f932a59153ccf38ab8cf96db74bb9dc0"
+checksum = "3019c0b8d883a8a17df3129e417ef463c087807d245e8881a31d583dee1c0519"
 dependencies = [
  "cfg-if",
  "getrandom 0.4.3",
@@ -390,9 +390,9 @@ dependencies = [
 
 [[package]]
 name = "allocator-api2"
-version = "0.2.21"
+version = "0.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+checksum = "57b212daf2e827b1ccdd778b7eb48ba433e58cb0e4f27b43cd6b7a608425a014"
 
 [[package]]
 name = "anyhow"
@@ -761,9 +761,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.11.3"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02f0e023adb368345ce0ca6cdfc0f24a06554468d0e8503e14a0841de79bfa69"
+checksum = "95e45cf2980b2d467be49a9ed942c9179b701063a7ca3d037de7ee9bd67f8d66"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1165,9 +1165,9 @@ dependencies = [
 
 [[package]]
 name = "datastar"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49a2209ee5f8954be4d6d90f253630d2be400965e604e7f8df446a75400a4ca8"
+checksum = "c4878c47442f15ba303632f9a241606e67f4deec016c69c8539e271d8eee3c12"
 dependencies = [
  "actix-sse",
  "actix-web",
@@ -1402,9 +1402,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
+checksum = "3e44f110d1777dc6559a51e7d45083945ded4f1bf3305494350f693b6d20b9c8"
 
 [[package]]
 name = "flate2"
@@ -1430,9 +1430,9 @@ dependencies = [
 
 [[package]]
 name = "flux-limiter"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa10db71684d528111cfd6783e4e1eb1eefd6c97d50ccb431ff2d73f539d1f2a"
+checksum = "93945e74dfe71b2711db770365813f38ed6a49212d6e4efac6215cd2880ee076"
 dependencies = [
  "dashmap",
 ]
@@ -3580,9 +3580,9 @@ dependencies = [
 
 [[package]]
 name = "russe"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "787f8671f6218476dc013f978b3880ef78516f92e3c2022a46003d0c105a8439"
+checksum = "9354a1583d38f4be2c7ccd8cc6656871d5f5f2b166e7297a80a29bc89116a329"
 dependencies = [
  "bytes",
  "bytestring",
